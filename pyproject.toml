@@ -1,0 +1,8 @@
+[project]
+name = "federated-predictive-maintenance"
+version = "1.0.0"
+description = "Privacy-Preserving Industrial IoT Predictive Maintenance & Digital Twin"
+requires-python = ">=3.10"
+
+[tool.vercel]
+entrypoint = "src.dashboard:app"

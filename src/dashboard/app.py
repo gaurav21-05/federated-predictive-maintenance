@@ -168,7 +168,10 @@ def get_benchmark_summary():
 
 
 # Static Files & SPA Root
-STATIC_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    STATIC_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -167,17 +167,28 @@ def get_benchmark_summary():
     }
 
 
+# Health check
+@app.get("/api/health")
+def get_health():
+    """Health check endpoint for uptime monitoring."""
+    return {"status": "ok", "app": "IIoT Predictive Maintenance"}
+
+
 # Static Files & SPA Root
 try:
-    STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    if STATIC_DIR.exists():
+        app.mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False), name="static")
 except Exception:
     pass
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 def serve_index():
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
-        return FileResponse(str(index_path))
-    return JSONResponse({"message": "Industrial IoT Dashboard API running. Static UI not found."})
+        return HTMLResponse(content=index_path.read_text(encoding="utf-8"))
+    public_path = PROJECT_ROOT / "public" / "index.html"
+    if public_path.exists():
+        return HTMLResponse(content=public_path.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<h1>IIoT Edge Intelligence Dashboard Active</h1><p>Visit <a href='/docs'>/docs</a> for API documentation.</p>")
+

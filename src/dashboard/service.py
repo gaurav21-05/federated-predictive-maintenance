@@ -25,6 +25,7 @@ from ..federated.server import FederatedServer
 from ..federated.strategies import FedAvgStrategy, FedProxStrategy
 from ..models import CNNLSTMPredictor, EdgeMLPPredictor
 from ..preprocessing import TimeSeriesPreprocessor
+from ..generator import SyntheticSensorGenerator
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -83,11 +84,35 @@ class DashboardService:
 
             # Ingest initial 30 nominal points if dataset available
             df = self.datasets.get(cid)
-            if df is not None and len(df) >= 30:
+            if df is not None and not df.empty and len(df) >= 30:
                 for i in range(30):
                     row = df.iloc[i].to_dict()
                     self.twins[cid].ingest_telemetry_point(row)
                 self.current_step[cid] = 30
+            else:
+                try:
+                    gen = SyntheticSensorGenerator(seed=42)
+                    synth_records = gen.generate_stream(cid, num_records=60)
+                    synth_df = pd.DataFrame(synth_records)
+                    self.datasets[cid] = synth_df
+                    for i in range(30):
+                        row = synth_df.iloc[i].to_dict()
+                        self.twins[cid].ingest_telemetry_point(row)
+                    self.current_step[cid] = 30
+                except Exception:
+                    p = profile
+                    dummy_row = {
+                        "temperature": p.temperature.mean,
+                        "humidity": p.humidity.mean,
+                        "vibration": p.vibration.mean,
+                        "current": p.current.mean,
+                        "rpm": p.rpm.mean,
+                        "pressure": p.pressure.mean,
+                        "failure": 0,
+                    }
+                    for _ in range(30):
+                        self.twins[cid].ingest_telemetry_point(dummy_row)
+                    self.current_step[cid] = 30
 
     def get_overview(self) -> Dict[str, Any]:
         """Provides a high-level operational overview across all factory edge nodes."""

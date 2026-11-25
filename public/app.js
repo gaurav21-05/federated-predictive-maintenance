@@ -295,18 +295,18 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="fleet-card-body">
           <div class="mini-metric">
             <span class="lbl">Health Index</span>
-            <span class="val" style="color: ${m.overall_health_index < 60 ? '#ff3366' : (m.overall_health_index < 80 ? '#ffb700' : '#00f0ff')}">${m.overall_health_index}%</span>
+            <span class="val" style="color: ${m.overall_health_index < 60 ? 'var(--color-error)' : (m.overall_health_index < 80 ? 'var(--color-warning-deep)' : 'var(--color-ink)')};">${m.overall_health_index}%</span>
           </div>
           <div class="mini-metric">
             <span class="lbl">Est. RUL</span>
-            <span class="val" style="color: #00ff88">${m.rul_minutes}m</span>
+            <span class="val" style="color: var(--color-link);">${m.rul_minutes}m</span>
           </div>
           <div class="mini-metric">
-            <span class="lbl">Fault Subsystem</span>
-            <span class="val" style="font-size: 0.85rem; color: #94a3b8;">${m.primary_fault_subsystem.split(' ')[0]}</span>
+            <span class="lbl">Fault Risk</span>
+            <span class="val" style="font-size: 0.82rem; color: var(--color-body);">${m.primary_fault_subsystem.split(' ')[0]}</span>
           </div>
         </div>
-        <div class="fleet-card-ftr" style="font-size: 0.72rem; color: #64748b; font-family: monospace;">
+        <div class="fleet-card-ftr" style="font-size: 11px; color: var(--color-mute); font-family: var(--font-mono);">
           Stream Step: ${m.current_step.toLocaleString()} / ${m.total_records.toLocaleString()}
         </div>
       `;
@@ -368,11 +368,11 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.dialProgress.style.strokeDashoffset = offset;
 
     if (mhi < 60) {
-      elements.dialProgress.style.stroke = '#ff3366';
+      elements.dialProgress.style.stroke = 'var(--color-error)';
     } else if (mhi < 80) {
-      elements.dialProgress.style.stroke = '#ffb700';
+      elements.dialProgress.style.stroke = 'var(--color-warning)';
     } else {
-      elements.dialProgress.style.stroke = '#00f0ff';
+      elements.dialProgress.style.stroke = 'var(--color-primary)';
     }
 
     // RUL Banner
@@ -403,11 +403,11 @@ document.addEventListener('DOMContentLoaded', () => {
     valEl.textContent = `${v}%`;
     barEl.style.width = `${Math.max(0, Math.min(100, v))}%`;
     if (v < 60) {
-      barEl.style.background = '#ff3366';
-      barEl.style.boxShadow = '0 0 8px #ff3366';
+      barEl.style.background = 'var(--color-error)';
     } else if (v < 80) {
-      barEl.style.background = '#ffb700';
-      barEl.style.boxShadow = '0 0 8px #ffb700';
+      barEl.style.background = 'var(--color-warning)';
+    } else {
+      barEl.style.background = '';
     }
   }
 
@@ -424,10 +424,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     ctx.clearRect(0, 0, width, height);
 
-    // Draw dark background grid
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    // Clean white canvas background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+
+    // Light hairline grid (Vercel style)
+    ctx.strokeStyle = '#f0f0f0';
     ctx.lineWidth = 1;
-    for (let x = 40; x < width; x += 60) {
+    for (let x = 45; x < width; x += 60) {
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, height);
@@ -441,8 +445,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (!records || records.length === 0) {
-      ctx.fillStyle = '#64748b';
-      ctx.font = '14px sans-serif';
+      ctx.fillStyle = '#888888';
+      ctx.font = '13px Geist, Inter, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText('Awaiting Sensor Telemetry Stream...', width / 2, height / 2);
       return;
@@ -456,28 +460,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const plotW = width - paddingLeft - paddingRight;
     const plotH = height - paddingTop - paddingBottom;
 
-    // Check for failure events to draw red danger zones
+    // Check for failure events to draw soft danger zones
     for (let i = 0; i < n; i++) {
       if (records[i].failure === 1) {
         const x = paddingLeft + (i / (n - 1)) * plotW;
-        ctx.fillStyle = 'rgba(255, 51, 102, 0.15)';
+        ctx.fillStyle = 'rgba(238, 0, 0, 0.08)';
         ctx.fillRect(x - 6, paddingTop, 12, plotH);
       }
     }
 
-    // Signals to plot
+    // Signals using Vercel theme colors
     const series = [
-      { key: 'temperature', color: '#ff3366', min: 40, max: 120 },
-      { key: 'vibration', color: '#00f0ff', min: 0.5, max: 8.0 },
-      { key: 'pressure', color: '#ffb700', min: 2, max: 200 },
-      { key: 'current', color: '#a855f7', min: 5, max: 60 },
+      { key: 'temperature', color: '#ee0000', min: 40, max: 120 },
+      { key: 'vibration', color: '#0070f3', min: 0.5, max: 8.0 },
+      { key: 'pressure', color: '#f5a623', min: 2, max: 200 },
+      { key: 'current', color: '#7928ca', min: 5, max: 60 },
     ];
 
     series.forEach(s => {
       ctx.strokeStyle = s.color;
       ctx.lineWidth = 2;
-      ctx.shadowColor = s.color;
-      ctx.shadowBlur = 4;
       ctx.beginPath();
 
       for (let i = 0; i < n; i++) {
@@ -491,11 +493,10 @@ document.addEventListener('DOMContentLoaded', () => {
         else ctx.lineTo(x, y);
       }
       ctx.stroke();
-      ctx.shadowBlur = 0;
     });
 
     // Axes
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.strokeStyle = '#ebebeb';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(paddingLeft, paddingTop);
@@ -504,8 +505,8 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.stroke();
 
     // Axis Labels
-    ctx.fillStyle = '#64748b';
-    ctx.font = '10px JetBrains Mono, monospace';
+    ctx.fillStyle = '#888888';
+    ctx.font = '10px Geist Mono, JetBrains Mono, monospace';
     ctx.textAlign = 'right';
     ctx.fillText('100%', paddingLeft - 8, paddingTop + 6);
     ctx.fillText('50%', paddingLeft - 8, paddingTop + plotH / 2 + 4);
@@ -525,8 +526,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     ctx.clearRect(0, 0, width, height);
 
+    // Clean white canvas background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+
     // Grid
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.strokeStyle = '#f0f0f0';
     ctx.lineWidth = 1;
     for (let y = 30; y < height; y += 40) {
       ctx.beginPath();
@@ -545,11 +550,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const plotH = height - padT - padB;
     const rounds = history.length;
 
-    // Draw Macro F1 Curve (Cyan)
-    ctx.strokeStyle = '#00f0ff';
+    // Draw Macro F1 Curve (Vercel Link Blue: #0070f3)
+    ctx.strokeStyle = '#0070f3';
     ctx.lineWidth = 2.5;
-    ctx.shadowColor = '#00f0ff';
-    ctx.shadowBlur = 6;
     ctx.beginPath();
     for (let i = 0; i < rounds; i++) {
       const f1 = history[i].macro_f1 || 0.5;
@@ -559,10 +562,9 @@ document.addEventListener('DOMContentLoaded', () => {
       else ctx.lineTo(x, y);
     }
     ctx.stroke();
-    ctx.shadowBlur = 0;
 
-    // Draw Loss Curve (Amber)
-    ctx.strokeStyle = '#ffb700';
+    // Draw Loss Curve (Vercel Warning Amber: #f5a623)
+    ctx.strokeStyle = '#f5a623';
     ctx.lineWidth = 2;
     ctx.beginPath();
     for (let i = 0; i < rounds; i++) {
@@ -581,28 +583,28 @@ document.addEventListener('DOMContentLoaded', () => {
       const f1 = history[i].macro_f1 || 0.5;
       const yF1 = padT + (1 - f1) * plotH;
 
-      ctx.fillStyle = '#00f0ff';
+      ctx.fillStyle = '#0070f3';
       ctx.beginPath();
       ctx.arc(x, yF1, 4, 0, Math.PI * 2);
       ctx.fill();
 
       // Label below
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '11px sans-serif';
+      ctx.fillStyle = '#888888';
+      ctx.font = '11px Geist Mono, monospace';
       ctx.textAlign = 'center';
       ctx.fillText(`R${history[i].round || (i + 1)}`, x, height - 15);
     }
 
     // Axes
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.strokeStyle = '#ebebeb';
     ctx.beginPath();
     ctx.moveTo(padL, padT);
     ctx.lineTo(padL, height - padB);
     ctx.lineTo(width - padR, height - padB);
     ctx.stroke();
 
-    ctx.fillStyle = '#64748b';
-    ctx.font = '10px monospace';
+    ctx.fillStyle = '#888888';
+    ctx.font = '10px Geist Mono, monospace';
     ctx.textAlign = 'right';
     ctx.fillText('1.0', padL - 8, padT + 4);
     ctx.fillText('0.5', padL - 8, padT + plotH / 2);
@@ -618,8 +620,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     ctx.clearRect(0, 0, width, height);
 
+    // Clean white canvas background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+
     // Grid
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.strokeStyle = '#f0f0f0';
     ctx.lineWidth = 1;
     for (let y = 20; y < height; y += 30) {
       ctx.beginPath();
@@ -637,7 +643,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Critical Threshold Line at 25% (H_crit)
     const critY = padT + (1 - 0.25) * plotH;
-    ctx.strokeStyle = 'rgba(255, 51, 102, 0.5)';
+    ctx.strokeStyle = 'rgba(238, 0, 0, 0.5)';
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
     ctx.moveTo(padL, critY);
@@ -645,12 +651,12 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    ctx.fillStyle = '#ff3366';
-    ctx.font = '10px monospace';
-    ctx.fillText('H_crit (25%)', width - padR - 65, critY - 6);
+    ctx.fillStyle = '#ee0000';
+    ctx.font = '10px Geist Mono, monospace';
+    ctx.fillText('H_crit (25%)', width - padR - 75, critY - 6);
 
-    // Curve 1: Nominal Degradation (Emerald dashed)
-    ctx.strokeStyle = '#00ff88';
+    // Curve 1: Nominal Degradation (Vercel Link Blue: #0070f3, dashed)
+    ctx.strokeStyle = '#0070f3';
     ctx.lineWidth = 2;
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
@@ -664,12 +670,10 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Curve 2: Stressed Simulation Degradation (Amber / Crimson)
+    // Curve 2: Stressed Simulation Degradation (Crimson / Warning)
     const wearFactor = state.whatIfResult ? state.whatIfResult.wear_acceleration_factor : 1.34;
-    ctx.strokeStyle = wearFactor > 1.2 ? '#ff3366' : '#ffb700';
+    ctx.strokeStyle = wearFactor > 1.2 ? '#ee0000' : '#f5a623';
     ctx.lineWidth = 2.5;
-    ctx.shadowColor = ctx.strokeStyle;
-    ctx.shadowBlur = 6;
     ctx.beginPath();
     for (let t = 0; t <= 60; t++) {
       const h = 99.0 * Math.exp(-0.0035 * wearFactor * t);
@@ -679,21 +683,20 @@ document.addEventListener('DOMContentLoaded', () => {
       else ctx.lineTo(x, y);
     }
     ctx.stroke();
-    ctx.shadowBlur = 0;
 
     // Axis
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.strokeStyle = '#ebebeb';
     ctx.beginPath();
     ctx.moveTo(padL, padT);
     ctx.lineTo(padL, height - padB);
     ctx.lineTo(width - padR, height - padB);
     ctx.stroke();
 
-    ctx.fillStyle = '#64748b';
-    ctx.font = '10px monospace';
+    ctx.fillStyle = '#888888';
+    ctx.font = '10px Geist Mono, monospace';
     ctx.fillText('100%', padL - 8, padT + 6);
     ctx.fillText('0 min', padL, height - 10);
-    ctx.fillText('Projection: 60 min', width - padR - 90, height - 10);
+    ctx.fillText('Projection: 60 min', width - padR - 95, height - 10);
   }
 
   function renderWhatIfResults(data) {
@@ -716,9 +719,9 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.workOrdersList.innerHTML = '';
     if (!orders || orders.length === 0) {
       elements.workOrdersList.innerHTML = `
-        <div class="card" style="text-align: center; color: #64748b; padding: 40px;">
-          <p>No active prescriptive work orders found for the selected filter.</p>
-          <small>Work orders auto-generate when a Digital Twin enters WARNING or CRITICAL state.</small>
+        <div class="card" style="text-align: center; color: var(--color-mute); padding: 40px;">
+          <p style="color: var(--color-body); font-weight: 500; margin-bottom: 4px;">No active prescriptive work orders found for the selected filter.</p>
+          <small style="color: var(--color-mute); font-family: var(--font-mono);">Work orders auto-generate when a Digital Twin enters WARNING or CRITICAL state.</small>
         </div>
       `;
       return;
@@ -732,7 +735,7 @@ document.addEventListener('DOMContentLoaded', () => {
       card.innerHTML = `
         <div class="wo-card-header">
           <div>
-            <span class="wo-id">${wo.work_order_id} • Dispatched at ${wo.timestamp}</span>
+            <span class="wo-id">${wo.work_order_id} &bull; Dispatched at ${wo.timestamp}</span>
             <div class="wo-machine">${wo.machine_name} (${wo.machine_id})</div>
           </div>
           <span class="tag ${isCrit ? 'tag-critical' : 'tag-warning'}">${wo.urgency}</span>
@@ -744,7 +747,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <div>
             <span class="wo-item-title">Machine Health Index</span>
-            <div class="wo-item-text" style="color: ${isCrit ? '#ff3366' : '#ffb700'}">${wo.machine_health_index}% (RUL: ${wo.estimated_rul_minutes}m)</div>
+            <div class="wo-item-text" style="color: ${isCrit ? 'var(--color-error)' : 'var(--color-warning-deep)'};">${wo.machine_health_index}% (RUL: ${wo.estimated_rul_minutes}m)</div>
           </div>
           <div>
             <span class="wo-item-title">Estimated Downtime</span>
@@ -757,10 +760,10 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <div>
           <span class="wo-item-title">Prescriptive Maintenance Action</span>
-          <p style="font-size: 0.88rem; color: #e2e8f0; margin-top: 4px;">${wo.recommended_action}</p>
+          <p style="font-size: 13px; color: var(--color-body); margin-top: 4px;">${wo.recommended_action}</p>
         </div>
         <div class="wo-footer">
-          <div class="wo-parts">Required Spares: <strong>${(wo.required_spare_parts || []).join(', ')}</strong></div>
+          <div class="wo-parts">Required Spares: <strong style="color: var(--color-ink);">${(wo.required_spare_parts || []).join(', ')}</strong></div>
           <div style="display: flex; gap: 8px;">
             ${wo.status === 'OPEN' ? `
               <button class="btn btn-sm btn-secondary" onclick="window.updateStatus('${wo.work_order_id}', 'ASSIGNED')">Assign Tech</button>

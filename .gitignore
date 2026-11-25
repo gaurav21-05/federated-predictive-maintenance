@@ -17,3 +17,7 @@ Thumbs.db
 *.log
 .pytest_cache/
 
+# Hardware firmware credentials
+hardware/esp32_firmware/config.h
+hardware/esp32_firmware/secrets.h
+

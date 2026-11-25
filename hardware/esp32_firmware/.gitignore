@@ -1,0 +1,11 @@
+# Local credentials - DO NOT COMMIT REAL CREDENTIALS
+config.h
+secrets.h
+
+# Arduino IDE & PlatformIO build artifacts
+.pio/
+build/
+*.bin
+*.elf
+*.hex
+.vscode/

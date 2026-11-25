@@ -4,20 +4,29 @@ Exposes RESTful APIs for telemetry monitoring, digital twin state sync, what-if 
 prescriptive maintenance work orders, and interactive federated learning runs.
 """
 
+import sys
+from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from .service import DashboardService
-
-# Resolve directories
+# Resolve directories and ensure project root is in sys.path
 DASHBOARD_DIR = Path(__file__).resolve().parent
 STATIC_DIR = DASHBOARD_DIR / "static"
 PROJECT_ROOT = DASHBOARD_DIR.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+try:
+    from .service import DashboardService
+except (ImportError, ValueError):
+    from src.dashboard.service import DashboardService
+
 
 app = FastAPI(
     title="IIoT Federated Predictive Maintenance & Digital Twin Dashboard",
@@ -39,6 +48,53 @@ service = DashboardService()
 
 
 # Request Models
+class TelemetrySource(str, Enum):
+    ESP32_LIVE = "ESP32_LIVE"
+    SIMULATED = "SIMULATED"
+
+
+class TelemetryIngestRequest(BaseModel):
+    machine_id: str = Field(..., min_length=1, max_length=64, description="Unique machine identifier (e.g. CNC_MILL_01)")
+    temperature_c: float = Field(..., ge=-40.0, le=150.0, description="Temperature in Celsius (-40.0°C to 150.0°C)")
+    humidity_pct: float = Field(..., ge=0.0, le=100.0, description="Relative humidity percentage (0.0% to 100.0%)")
+    acceleration_x: float = Field(..., ge=-50.0, le=50.0, description="Acceleration along X-axis in g (-50.0g to 50.0g)")
+    acceleration_y: float = Field(..., ge=-50.0, le=50.0, description="Acceleration along Y-axis in g (-50.0g to 50.0g)")
+    acceleration_z: float = Field(..., ge=-50.0, le=50.0, description="Acceleration along Z-axis in g (-50.0g to 50.0g)")
+    gyro_x: float = Field(..., ge=-2000.0, le=2000.0, description="Angular velocity around X-axis in deg/s (-2000.0 to 2000.0 deg/s)")
+    gyro_y: float = Field(..., ge=-2000.0, le=2000.0, description="Angular velocity around Y-axis in deg/s (-2000.0 to 2000.0 deg/s)")
+    gyro_z: float = Field(..., ge=-2000.0, le=2000.0, description="Angular velocity around Z-axis in deg/s (-2000.0 to 2000.0 deg/s)")
+    vibration_g: float = Field(..., ge=0.0, le=50.0, description="Vibration amplitude/RMS in g (0.0g to 50.0g)")
+    source: TelemetrySource = Field(..., description="Telemetry source attribution: 'ESP32_LIVE' or 'SIMULATED'")
+    timestamp: Optional[str] = Field(default=None, description="ISO-8601 UTC timestamp string (optional, defaults to server UTC)")
+
+    # Optional complementary parameters
+    current_a: Optional[float] = Field(default=None, ge=0.0, le=500.0, description="Optional motor current in Amperes")
+    rpm: Optional[float] = Field(default=None, ge=0.0, le=20000.0, description="Optional rotational speed in RPM")
+    pressure_bar: Optional[float] = Field(default=None, ge=0.0, le=500.0, description="Optional hydraulic/pneumatic pressure in bar")
+
+    @field_validator("machine_id")
+    @classmethod
+    def validate_machine_id(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("machine_id must not be empty or whitespace only")
+        return s
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v_str = str(v).strip()
+        if not v_str:
+            return None
+        try:
+            datetime.fromisoformat(v_str.replace("Z", "+00:00"))
+        except Exception:
+            raise ValueError(f"Invalid timestamp format '{v}'. Expected ISO-8601 formatted timestamp string.")
+        return v_str
+
+
 class StepRequest(BaseModel):
     client_id: Optional[str] = None
     steps: int = Field(default=1, ge=1, le=100)
@@ -88,6 +144,25 @@ def get_telemetry_stream(
 ):
     """Returns the current historical window of sensor telemetry for the selected client."""
     return service.get_telemetry_window(client_id, window)
+
+
+@app.post("/api/telemetry/ingest")
+def ingest_telemetry(payload: TelemetryIngestRequest):
+    """
+    Ingests sensor telemetry from physical edge hardware (ESP32_LIVE) or synthetic simulation (SIMULATED).
+    Validates physical sensor bounds, routes reading to Digital Twin state engine,
+    and returns ingestion status, machine ID, timestamp, and source attribution.
+    """
+    timestamp = payload.timestamp or datetime.now(timezone.utc).isoformat()
+    data = payload.model_dump()
+    data["timestamp"] = timestamp
+    return service.ingest_telemetry(data)
+
+
+@app.get("/api/telemetry/latest")
+def get_latest_telemetry():
+    """Returns the most recent live or simulated telemetry reading and in-memory buffer statistics."""
+    return service.get_latest_ingested_sample()
 
 
 @app.post("/api/digital-twin/step")
@@ -191,4 +266,10 @@ def serve_index():
     if public_path.exists():
         return HTMLResponse(content=public_path.read_text(encoding="utf-8"))
     return HTMLResponse(content="<h1>IIoT Edge Intelligence Dashboard Active</h1><p>Visit <a href='/docs'>/docs</a> for API documentation.</p>")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("src.dashboard.app:app", host="127.0.0.1", port=8000, reload=True)
+
 

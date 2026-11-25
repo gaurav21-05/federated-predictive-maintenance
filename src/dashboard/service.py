@@ -4,31 +4,45 @@ Orchestrates digital twin synchronization, telemetry streaming, RUL forecasting,
 what-if stress simulation, prescriptive maintenance dispatching, and federated learning execution.
 """
 
+import sys
 from datetime import datetime
-import json
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from ..config import CLIENT_PROFILES, SENSOR_COLUMNS, FactoryProfile
-from ..digital_twin.twin_engine import MachineDigitalTwin
-from ..digital_twin.rul_estimator import RULEstimator, RULPrediction
-from ..digital_twin.what_if_simulator import WhatIfSimulator, SimulationScenario
-from ..digital_twin.maintenance_dispatcher import PrescriptiveMaintenanceDispatcher, MaintenanceWorkOrder
-from ..federated.client import FederatedEdgeClient
-from ..federated.server import FederatedServer
-from ..federated.strategies import FedAvgStrategy, FedProxStrategy
-from ..models import CNNLSTMPredictor, EdgeMLPPredictor
-from ..preprocessing import TimeSeriesPreprocessor
-from ..generator import SyntheticSensorGenerator
-
-
+# Ensure project root is in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+try:
+    from ..config import CLIENT_PROFILES
+    from ..digital_twin.twin_engine import MachineDigitalTwin
+    from ..digital_twin.rul_estimator import RULEstimator
+    from ..digital_twin.what_if_simulator import WhatIfSimulator, SimulationScenario
+    from ..digital_twin.maintenance_dispatcher import PrescriptiveMaintenanceDispatcher
+    from ..federated.client import FederatedEdgeClient
+    from ..federated.server import FederatedServer
+    from ..federated.strategies import FedAvgStrategy, FedProxStrategy
+    from ..models import CNNLSTMPredictor
+    from ..preprocessing import TimeSeriesPreprocessor
+    from ..generator import SyntheticSensorGenerator
+except (ImportError, ValueError):
+    from src.config import CLIENT_PROFILES
+    from src.digital_twin.twin_engine import MachineDigitalTwin
+    from src.digital_twin.rul_estimator import RULEstimator
+    from src.digital_twin.what_if_simulator import WhatIfSimulator, SimulationScenario
+    from src.digital_twin.maintenance_dispatcher import PrescriptiveMaintenanceDispatcher
+    from src.federated.client import FederatedEdgeClient
+    from src.federated.server import FederatedServer
+    from src.federated.strategies import FedAvgStrategy, FedProxStrategy
+    from src.models import CNNLSTMPredictor
+    from src.preprocessing import TimeSeriesPreprocessor
+    from src.generator import SyntheticSensorGenerator
+
 
 
 class DashboardService:
@@ -57,6 +71,11 @@ class DashboardService:
         # 3. Federated Learning state cache
         self.last_fl_results: Optional[Dict[str, Any]] = None
         self._cached_loaders: Optional[Dict[str, DataLoader]] = None
+
+        # 4. Ingested live/simulated telemetry buffer (in-memory ring buffer)
+        self.ingested_telemetry_history: List[Dict[str, Any]] = []
+        self.latest_ingested_sample: Optional[Dict[str, Any]] = None
+        self.total_ingested_count: int = 0
 
     def _load_datasets(self):
         """Loads client sensor CSVs into memory."""
@@ -450,3 +469,157 @@ class DashboardService:
             "convergence": convergence_series,
             "final_eval": results.get("final_eval", {}),
         }
+
+    def resolve_machine_client_id(self, machine_id: str) -> str:
+        """
+        Maps an incoming machine_id (or alias) to an existing client_id in the factory fleet.
+        Supported mappings:
+          - 'client_1', 'client_2', 'client_3'
+          - 'CNC_MILL_01' -> 'client_1'
+          - 'HYDR_PRESS_02' / 'HYD_PRESS_02' -> 'client_2'
+          - 'TURB_COMP_03' / 'TURBO_COMP_03' -> 'client_3'
+        """
+        clean_id = str(machine_id).strip()
+        lower_id = clean_id.lower()
+        if lower_id in self.client_ids:
+            return lower_id
+
+        upper_id = clean_id.upper()
+        for cid, twin in self.twins.items():
+            t_mid = getattr(twin.profile, "machine_id", "").upper()
+            if t_mid == upper_id:
+                return cid
+
+        if "CNC" in upper_id or "MILL" in upper_id:
+            return "client_1"
+        elif "HYDR" in upper_id or "PRESS" in upper_id:
+            return "client_2"
+        elif "TURB" in upper_id or "COMP" in upper_id:
+            return "client_3"
+
+        return "client_1"
+
+    def ingest_telemetry(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Processes an incoming live hardware (ESP32_LIVE) or synthetic (SIMULATED) sample.
+        Validates the mapping to a Digital Twin, executes state synchronization,
+        updates physical health & RUL forecasts, evaluates work-order dispatch triggers,
+        and records the sample strictly into volatile in-memory storage.
+        """
+        machine_id = str(payload.get("machine_id", "UNKNOWN")).strip()
+        source = str(payload.get("source", "SIMULATED")).strip()
+        timestamp = str(payload.get("timestamp", datetime.now().isoformat()))
+
+        target_cid = self.resolve_machine_client_id(machine_id)
+        twin = self.twins.get(target_cid)
+        profile = getattr(twin, "profile", None) if twin else None
+
+        # Convert vibration_g to mm/s RMS for physical twin engine
+        # Standard calibration: 1g RMS vibration ≈ 9.81 mm/s RMS normalized scale
+        vib_g = float(payload["vibration_g"])
+        vib_mms = round(vib_g * 9.81, 3)
+
+        twin_telemetry = {
+            "timestamp": timestamp,
+            "machine_id": machine_id,
+            "temperature": float(payload["temperature_c"]),
+            "humidity": float(payload["humidity_pct"]),
+            "vibration": vib_mms,
+            "current": float(payload.get("current_a", getattr(profile.current, "mean", 18.5) if profile else 18.5)),
+            "rpm": float(payload.get("rpm", getattr(profile.rpm, "mean", 3850.0) if profile else 3850.0)),
+            "pressure": float(payload.get("pressure_bar", getattr(profile.pressure, "mean", 6.2) if profile else 6.2)),
+            "failure": 0,
+            # IMU Kinematic channels
+            "acceleration_x": float(payload["acceleration_x"]),
+            "acceleration_y": float(payload["acceleration_y"]),
+            "acceleration_z": float(payload["acceleration_z"]),
+            "gyro_x": float(payload["gyro_x"]),
+            "gyro_y": float(payload["gyro_y"]),
+            "gyro_z": float(payload["gyro_z"]),
+            "vibration_g": vib_g,
+            "source": source,
+        }
+
+        twin_state = {}
+        rul_info = {}
+        dispatched_orders = []
+
+        if twin:
+            twin_state = twin.ingest_telemetry_point(twin_telemetry)
+            rul_estimator = self.rul_estimators.get(target_cid)
+            if rul_estimator:
+                rul_pred = rul_estimator.predict_rul(
+                    twin_state.get("overall_health_index", 100.0),
+                    twin.failure_probability,
+                )
+                rul_info = rul_pred.to_dict()
+
+                # Check for prescriptive maintenance dispatch
+                wo = self.dispatcher.evaluate_twin(twin, rul_pred)
+                if wo:
+                    dispatched_orders.append(wo.to_dict())
+
+        sample_record = {
+            "machine_id": machine_id,
+            "target_client_id": target_cid,
+            "source": source,
+            "timestamp": timestamp,
+            "sensors": {
+                "temperature_c": float(payload["temperature_c"]),
+                "humidity_pct": float(payload["humidity_pct"]),
+                "acceleration_x": float(payload["acceleration_x"]),
+                "acceleration_y": float(payload["acceleration_y"]),
+                "acceleration_z": float(payload["acceleration_z"]),
+                "gyro_x": float(payload["gyro_x"]),
+                "gyro_y": float(payload["gyro_y"]),
+                "gyro_z": float(payload["gyro_z"]),
+                "vibration_g": vib_g,
+            },
+            "digital_twin_sync": {
+                "overall_health_index": twin_state.get("overall_health_index"),
+                "operational_state": twin_state.get("operational_state"),
+                "rul_minutes": rul_info.get("rul_minutes"),
+            },
+            "storage": "in_memory",
+            "persisted": False,
+        }
+
+        self.latest_ingested_sample = sample_record
+        self.ingested_telemetry_history.append(sample_record)
+        if len(self.ingested_telemetry_history) > 1000:
+            self.ingested_telemetry_history.pop(0)
+        self.total_ingested_count += 1
+
+        return {
+            "status": "success",
+            "machine_id": machine_id,
+            "timestamp": timestamp,
+            "source": source,
+            "storage": "in_memory",
+            "persisted": False,
+            "target_client_id": target_cid,
+            "digital_twin": {
+                "overall_health_index": twin_state.get("overall_health_index"),
+                "operational_state": twin_state.get("operational_state"),
+                "rul_minutes": rul_info.get("rul_minutes"),
+                "primary_fault_subsystem": twin_state.get("primary_fault_subsystem"),
+            },
+            "new_work_orders": dispatched_orders,
+        }
+
+    def get_latest_ingested_sample(self) -> Dict[str, Any]:
+        """Returns the most recent live/simulated telemetry sample and buffer metadata."""
+        return {
+            "total_ingested": self.total_ingested_count,
+            "latest_sample": self.latest_ingested_sample,
+            "buffer_size": len(self.ingested_telemetry_history),
+            "storage": "in_memory",
+        }
+
+
+if __name__ == "__main__":
+    srv = DashboardService()
+    print("DashboardService initialized successfully.")
+    overview = srv.get_overview()
+    print(f"Fleet Status: {overview['fleet_status']}, Fleet Health: {overview['fleet_health_index']}%")
+

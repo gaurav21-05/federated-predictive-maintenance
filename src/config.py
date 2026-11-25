@@ -1,151 +1,93 @@
 """
-Sensor and Factory Configuration Module
-Defines operational parameters, baseline distributions, and physical bounds
-for different industrial IoT clients (factories/machines) to simulate non-IID distributions.
+Physical Hardware Node & Sensor Configuration Module.
+Defines operational parameters, baseline bounds, and node configurations
+for real Industrial IoT edge devices (ESP32 DevKit V1 + MPU6050 + DHT11 + ACS712).
+
+Pure Python. No synthetic factories or dummy machines.
 """
 
-from dataclasses import dataclass, field
+import os
+from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
-class OperatingCondition(str, Enum):
-    """Machine operational states."""
-    NORMAL = "NORMAL"
+class OperationalState(str, Enum):
+    """Real machine operational states."""
+    OPTIMAL = "OPTIMAL"
     WARNING = "WARNING"
-    ABNORMAL = "ABNORMAL"
+    CRITICAL = "CRITICAL"
+    OFFLINE = "OFFLINE"
 
 
-# Target feature columns as specified in requirements
-SENSOR_COLUMNS = [
+# Real sensor columns matching ThingSpeak 8-channel feed
+REAL_SENSOR_COLUMNS = [
     "timestamp",
-    "machine_id",
-    "temperature",
-    "humidity",
-    "vibration",
-    "current",
-    "rpm",
-    "pressure",
-    "failure",
+    "entry_id",
+    "temperature_c",
+    "humidity_pct",
+    "temp_secondary_c",
+    "pressure_hpa",
+    "vibration_g",
+    "current_a",
+    "esp32_anomaly",
+    "esp32_alert",
+    "status",
 ]
 
 
 @dataclass
-class SensorBaseline:
-    """Nominal mean and Gaussian standard deviation under normal state."""
-    mean: float
-    std: float
-    min_val: float
-    max_val: float
-    warning_mult: float  # Multiplier or shift during warning state
-    abnormal_mult: float  # Multiplier or shift during abnormal state
+class HardwareNodeProfile:
+    """Configuration profile for a physical IoT edge device."""
+    node_id: str
+    channel_id: str
+    device_name: str
+    description: str
+    microcontroller: str
+    sampling_interval_seconds: float
+    nominal_vibration_g: float = 0.022
+    nominal_temperature_c: float = 24.0
+    nominal_humidity_pct: float = 65.0
+    nominal_pressure_hpa: float = 994.5
+    nominal_current_a: Optional[float] = None
 
 
-@dataclass
-class FactoryProfile:
-    """
-    Configuration profile representing an industrial factory/machine client.
-    Each client has a distinct physical profile to represent non-IID data distributions.
-    """
-    client_id: str
-    machine_id: str
-    machine_type: str
-    location: str
-    sampling_rate_seconds: int
-    temperature: SensorBaseline
-    humidity: SensorBaseline
-    vibration: SensorBaseline
-    current: SensorBaseline
-    rpm: SensorBaseline
-    pressure: SensorBaseline
-    # Failure hazard weights for physics engine
-    weight_temp: float = 0.25
-    weight_vib: float = 0.30
-    weight_current: float = 0.15
-    weight_rpm: float = 0.15
-    weight_pressure: float = 0.15
-    base_degradation_rate: float = 0.00012
-
-
-# Factory 1: High-Speed CNC Milling Center (High RPM, Thermal & Bearing Vibration critical)
-CLIENT_1_PROFILE = FactoryProfile(
-    client_id="client_1",
-    machine_id="CNC_MILL_01",
-    machine_type="5-Axis High-Speed CNC Milling Machine",
-    location="Factory-A (Precision Machining Plant)",
-    sampling_rate_seconds=10,
-    temperature=SensorBaseline(mean=62.0, std=2.5, min_val=30.0, max_val=110.0, warning_mult=1.18, abnormal_mult=1.45),
-    humidity=SensorBaseline(mean=45.0, std=3.0, min_val=20.0, max_val=80.0, warning_mult=1.05, abnormal_mult=1.12),
-    vibration=SensorBaseline(mean=1.20, std=0.15, min_val=0.2, max_val=9.5, warning_mult=2.2, abnormal_mult=4.5),
-    current=SensorBaseline(mean=18.5, std=1.2, min_val=5.0, max_val=48.0, warning_mult=1.35, abnormal_mult=1.9),
-    rpm=SensorBaseline(mean=3850.0, std=45.0, min_val=1000.0, max_val=5000.0, warning_mult=0.92, abnormal_mult=0.72),
-    pressure=SensorBaseline(mean=6.2, std=0.25, min_val=2.0, max_val=12.0, warning_mult=0.88, abnormal_mult=0.60),
-    weight_temp=0.30,
-    weight_vib=0.35,
-    weight_current=0.15,
-    weight_rpm=0.10,
-    weight_pressure=0.10,
-    base_degradation_rate=0.00010,
-)
-
-# Factory 2: Heavy Hydraulic Stamping Press (High Hydraulic Pressure, High Shock Vibration)
-CLIENT_2_PROFILE = FactoryProfile(
-    client_id="client_2",
-    machine_id="HYDR_PRESS_02",
-    machine_type="Heavy-Duty Hydraulic Stamping Press",
-    location="Factory-B (Metal Forming & Stamping Works)",
-    sampling_rate_seconds=10,
-    temperature=SensorBaseline(mean=51.5, std=2.0, min_val=25.0, max_val=98.0, warning_mult=1.22, abnormal_mult=1.55),
-    humidity=SensorBaseline(mean=38.0, std=2.5, min_val=15.0, max_val=75.0, warning_mult=1.04, abnormal_mult=1.10),
-    vibration=SensorBaseline(mean=2.40, std=0.25, min_val=0.5, max_val=12.0, warning_mult=1.9, abnormal_mult=3.8),
-    current=SensorBaseline(mean=34.0, std=2.1, min_val=10.0, max_val=75.0, warning_mult=1.40, abnormal_mult=2.1),
-    rpm=SensorBaseline(mean=1120.0, std=20.0, min_val=300.0, max_val=1800.0, warning_mult=0.90, abnormal_mult=0.65),
-    pressure=SensorBaseline(mean=185.0, std=6.5, min_val=50.0, max_val=280.0, warning_mult=1.18, abnormal_mult=1.38),
-    weight_temp=0.15,
-    weight_vib=0.25,
-    weight_current=0.15,
-    weight_rpm=0.10,
-    weight_pressure=0.35,
-    base_degradation_rate=0.00012,
-)
-
-# Factory 3: Industrial Turbine & Compressor (High Humidity sensitivity, Current anomalies, Pneumatic loss)
-CLIENT_3_PROFILE = FactoryProfile(
-    client_id="client_3",
-    machine_id="TURB_COMP_03",
-    machine_type="Rotary Screw Air Compressor & Micro-Turbine",
-    location="Factory-C (Chemical Processing & Utilities Facility)",
-    sampling_rate_seconds=10,
-    temperature=SensorBaseline(mean=57.0, std=2.2, min_val=28.0, max_val=105.0, warning_mult=1.20, abnormal_mult=1.50),
-    humidity=SensorBaseline(mean=72.0, std=4.5, min_val=35.0, max_val=98.0, warning_mult=1.15, abnormal_mult=1.28),
-    vibration=SensorBaseline(mean=1.65, std=0.18, min_val=0.3, max_val=10.0, warning_mult=2.0, abnormal_mult=4.0),
-    current=SensorBaseline(mean=27.5, std=1.8, min_val=8.0, max_val=60.0, warning_mult=1.45, abnormal_mult=2.2),
-    rpm=SensorBaseline(mean=3150.0, std=35.0, min_val=900.0, max_val=4200.0, warning_mult=0.94, abnormal_mult=0.75),
-    pressure=SensorBaseline(mean=8.8, std=0.40, min_val=2.5, max_val=16.0, warning_mult=0.82, abnormal_mult=0.55),
-    weight_temp=0.20,
-    weight_vib=0.20,
-    weight_current=0.30,
-    weight_rpm=0.15,
-    weight_pressure=0.15,
-    base_degradation_rate=0.00011,
-)
-
-
-CLIENT_PROFILES: Dict[str, FactoryProfile] = {
-    "client_1": CLIENT_1_PROFILE,
-    "client_2": CLIENT_2_PROFILE,
-    "client_3": CLIENT_3_PROFILE,
+# Configurable registry of physical hardware edge devices.
+# Adding more ESP32s later requires only adding entries to this dictionary.
+HARDWARE_NODES: Dict[str, HardwareNodeProfile] = {
+    "node_1": HardwareNodeProfile(
+        node_id="node_1",
+        channel_id=os.environ.get("TS_CHANNEL_ID", "3591448"),
+        device_name="ESP32 Bench Edge Node 1",
+        description="Physical testbed bench with MPU6050, DHT11, and 12V DC motor",
+        microcontroller="ESP32 DevKit V1 (ESP-WROOM-32)",
+        sampling_interval_seconds=20.0,
+        nominal_vibration_g=0.022,
+        nominal_temperature_c=24.0,
+        nominal_humidity_pct=65.0,
+        nominal_pressure_hpa=994.5,
+    )
 }
 
+# Configurable field mapping for ThingSpeak 8-channel feed
+FIELD_MAPPINGS = {
+    "field1": {"key": "temperature_c", "name": "Temperature", "unit": "°C", "sensor": "DHT11", "confirmed": True},
+    "field2": {"key": "humidity_pct", "name": "Humidity", "unit": "%", "sensor": "DHT11", "confirmed": True},
+    "field3": {"key": "temp_secondary_c", "name": "Field 3 (secondary temp?)", "unit": "°C", "sensor": "Unconfirmed", "confirmed": False},
+    "field4": {"key": "pressure_hpa", "name": "Field 4 (pressure?)", "unit": "hPa", "sensor": "Unconfirmed (likely BMP/BME)", "confirmed": False},
+    "field5": {"key": "vibration_g", "name": "Vibration RMS", "unit": "g", "sensor": "MPU6050", "confirmed": True},
+    "field6": {"key": "current_a", "name": "Motor Current", "unit": "A", "sensor": "ACS712 (reserved, currently NA)", "confirmed": True},
+    "field7": {"key": "esp32_anomaly", "name": "ESP32 Anomaly Flag", "unit": "binary", "sensor": "Firmware logic", "confirmed": True},
+    "field8": {"key": "esp32_alert", "name": "ESP32 Alert/Buzzer", "unit": "binary", "sensor": "LED/Buzzer trigger", "confirmed": True},
+}
 
-class ClientConfig:
-    """Helper to access factory profiles."""
-    @staticmethod
-    def get(client_id: str) -> FactoryProfile:
-        if client_id not in CLIENT_PROFILES:
-            raise ValueError(f"Unknown client_id: '{client_id}'. Supported clients: {list(CLIENT_PROFILES.keys())}")
-        return CLIENT_PROFILES[client_id]
-
-    @staticmethod
-    def all() -> Dict[str, FactoryProfile]:
-        return CLIENT_PROFILES
+RUL_CONFIG = {
+    "warning_threshold_hi": 60.0,
+    "failure_threshold_hi": 30.0,
+    "min_samples_for_rul": 30,
+    "max_acceptable_vibration_g": 0.25,
+    "subsystem_weights": {
+        "without_current": {"vibration": 0.55, "thermal": 0.30, "environment": 0.15},
+        "with_current": {"vibration": 0.45, "thermal": 0.25, "environment": 0.10, "electrical": 0.20},
+    },
+}

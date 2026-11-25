@@ -1,625 +1,187 @@
 """
-Industrial IoT Predictive Maintenance Dashboard Service Layer
-Orchestrates digital twin synchronization, telemetry streaming, RUL forecasting,
-what-if stress simulation, prescriptive maintenance dispatching, and federated learning execution.
+Industrial IoT Real-Data Service Layer.
+Connects directly to ThingSpeak live hardware telemetry and local feeds.csv fallback.
+Stateless and safe for Vercel Serverless (zero PyTorch dependencies).
 """
 
-import sys
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
-import numpy as np
-import pandas as pd
-import torch
-from torch.utils.data import DataLoader, TensorDataset
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-# Ensure project root is in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
-    from ..config import CLIENT_PROFILES
-    from ..digital_twin.twin_engine import MachineDigitalTwin
-    from ..digital_twin.rul_estimator import RULEstimator
-    from ..digital_twin.what_if_simulator import WhatIfSimulator, SimulationScenario
-    from ..digital_twin.maintenance_dispatcher import PrescriptiveMaintenanceDispatcher
-    from ..federated.client import FederatedEdgeClient
-    from ..federated.server import FederatedServer
-    from ..federated.strategies import FedAvgStrategy, FedProxStrategy
-    from ..models import CNNLSTMPredictor
-    from ..preprocessing import TimeSeriesPreprocessor
-    from ..generator import SyntheticSensorGenerator
+    from .thingspeak import ThingSpeakAdapter, FIELD_MAPPING
+    from .live_analytics import (
+        compute_descriptive_stats,
+        compute_robust_baseline,
+        detect_anomalies,
+        detect_anomaly_episodes,
+        analyze_trends,
+        compute_correlations,
+        generate_data_quality_report,
+    )
+    from .live_rul import (
+        compute_live_health_series,
+        compute_sample_subsystems,
+        compute_composite_health_index,
+        estimate_rul,
+        DEFAULT_WARNING_THRESHOLD,
+        DEFAULT_FAILURE_THRESHOLD,
+    )
 except (ImportError, ValueError):
-    from src.config import CLIENT_PROFILES
-    from src.digital_twin.twin_engine import MachineDigitalTwin
-    from src.digital_twin.rul_estimator import RULEstimator
-    from src.digital_twin.what_if_simulator import WhatIfSimulator, SimulationScenario
-    from src.digital_twin.maintenance_dispatcher import PrescriptiveMaintenanceDispatcher
-    from src.federated.client import FederatedEdgeClient
-    from src.federated.server import FederatedServer
-    from src.federated.strategies import FedAvgStrategy, FedProxStrategy
-    from src.models import CNNLSTMPredictor
-    from src.preprocessing import TimeSeriesPreprocessor
-    from src.generator import SyntheticSensorGenerator
+    from src.dashboard.thingspeak import ThingSpeakAdapter, FIELD_MAPPING
+    from src.dashboard.live_analytics import (
+        compute_descriptive_stats,
+        compute_robust_baseline,
+        detect_anomalies,
+        detect_anomaly_episodes,
+        analyze_trends,
+        compute_correlations,
+        generate_data_quality_report,
+    )
+    from src.dashboard.live_rul import (
+        compute_live_health_series,
+        compute_sample_subsystems,
+        compute_composite_health_index,
+        estimate_rul,
+        DEFAULT_WARNING_THRESHOLD,
+        DEFAULT_FAILURE_THRESHOLD,
+    )
 
 
-
-class DashboardService:
+class LiveDashboardService:
     """
-    Core state management and orchestration engine for the Web Dashboard.
+    Stateless service coordinating physical ThingSpeak telemetry retrieval,
+    signal analysis, dynamic twin state synchronization, and RUL estimation.
     """
 
-    def __init__(self, data_dir: Optional[Union[str, Path]] = None, device: str = "cpu"):
-        self.data_dir = Path(data_dir) if data_dir else PROJECT_ROOT / "data"
-        self.device = device
-        self.client_ids = ["client_1", "client_2", "client_3"]
+    def __init__(self, adapter: Optional[ThingSpeakAdapter] = None):
+        self.adapter = adapter or ThingSpeakAdapter()
 
-        # 1. Load telemetry datasets
-        self.datasets: Dict[str, pd.DataFrame] = {}
-        self.current_step: Dict[str, int] = {cid: 0 for cid in self.client_ids}
-        self._load_datasets()
-
-        # 2. Digital Twin & RUL Engines
-        self.twins: Dict[str, MachineDigitalTwin] = {}
-        self.rul_estimators: Dict[str, RULEstimator] = {}
-        self.what_if_simulators: Dict[str, WhatIfSimulator] = {}
-        self.dispatcher = PrescriptiveMaintenanceDispatcher()
-
-        self._init_digital_twins()
-
-        # 3. Federated Learning state cache
-        self.last_fl_results: Optional[Dict[str, Any]] = None
-        self._cached_loaders: Optional[Dict[str, DataLoader]] = None
-
-        # 4. Ingested live/simulated telemetry buffer (in-memory ring buffer)
-        self.ingested_telemetry_history: List[Dict[str, Any]] = []
-        self.latest_ingested_sample: Optional[Dict[str, Any]] = None
-        self.total_ingested_count: int = 0
-
-    def _load_datasets(self):
-        """Loads client sensor CSVs into memory."""
-        for cid in self.client_ids:
-            csv_path = self.data_dir / cid / f"{cid}_sensor_data.csv"
-            if csv_path.exists():
-                df = pd.read_csv(csv_path)
-                self.datasets[cid] = df
-            else:
-                # Fallback to empty dataframe
-                self.datasets[cid] = pd.DataFrame()
-
-    def _init_digital_twins(self):
-        """Initializes MachineDigitalTwin instances for each industrial machine."""
-        for cid in self.client_ids:
-            profile = CLIENT_PROFILES.get(cid, CLIENT_PROFILES["client_1"])
-            self.twins[cid] = MachineDigitalTwin(
-                client_id=cid,
-                profile=profile,
-                window_size=30,
-                device=self.device,
-            )
-            self.rul_estimators[cid] = RULEstimator(client_id=cid)
-            self.what_if_simulators[cid] = WhatIfSimulator(self.rul_estimators[cid])
-
-            # Ingest initial 30 nominal points if dataset available
-            df = self.datasets.get(cid)
-            if df is not None and not df.empty and len(df) >= 30:
-                for i in range(30):
-                    row = df.iloc[i].to_dict()
-                    self.twins[cid].ingest_telemetry_point(row)
-                self.current_step[cid] = 30
-            else:
-                try:
-                    gen = SyntheticSensorGenerator(seed=42)
-                    synth_records = gen.generate_stream(cid, num_records=60)
-                    synth_df = pd.DataFrame(synth_records)
-                    self.datasets[cid] = synth_df
-                    for i in range(30):
-                        row = synth_df.iloc[i].to_dict()
-                        self.twins[cid].ingest_telemetry_point(row)
-                    self.current_step[cid] = 30
-                except Exception:
-                    p = profile
-                    dummy_row = {
-                        "temperature": p.temperature.mean,
-                        "humidity": p.humidity.mean,
-                        "vibration": p.vibration.mean,
-                        "current": p.current.mean,
-                        "rpm": p.rpm.mean,
-                        "pressure": p.pressure.mean,
-                        "failure": 0,
-                    }
-                    for _ in range(30):
-                        self.twins[cid].ingest_telemetry_point(dummy_row)
-                    self.current_step[cid] = 30
-
-    def get_overview(self) -> Dict[str, Any]:
-        """Provides a high-level operational overview across all factory edge nodes."""
-        machines = []
-        overall_healths = []
-        critical_count = 0
-        warning_count = 0
-
-        for cid in self.client_ids:
-            twin = self.twins[cid]
-            state = twin.get_state_snapshot()
-            mhi = state.get("overall_health_index", 100.0)
-            overall_healths.append(mhi)
-
-            rul_pred = self.rul_estimators[cid].predict_rul(mhi, twin.failure_probability)
-            op_state = state.get("operational_state", "NORMAL")
-            if op_state == "CRITICAL":
-                critical_count += 1
-            elif op_state == "WARNING":
-                warning_count += 1
-
-            machines.append({
-                "client_id": cid,
-                "machine_id": getattr(twin.profile, "machine_id", cid.upper()),
-                "machine_name": getattr(twin.profile, "machine_type", "Industrial Unit"),
-                "operational_state": op_state,
-                "overall_health_index": round(mhi, 1),
-                "subsystem_health": {k: round(v, 1) for k, v in state.get("subsystem_health", {}).items()},
-                "primary_fault_subsystem": state.get("primary_fault_subsystem", "Healthy"),
-                "rul_minutes": round(rul_pred.rul_minutes, 1),
-                "urgency_level": rul_pred.urgency_level,
-                "current_step": self.current_step[cid],
-                "total_records": len(self.datasets.get(cid, [])),
-            })
-
-        fleet_health = round(float(np.mean(overall_healths)), 1) if overall_healths else 100.0
-
-        return {
-            "timestamp": datetime.now().isoformat(),
-            "fleet_health_index": fleet_health,
-            "fleet_status": "CRITICAL" if critical_count > 0 else ("WARNING" if warning_count > 0 else "OPTIMAL"),
-            "machines": machines,
-            "open_work_orders": len([wo for wo in self.dispatcher.work_orders if wo.status == "OPEN"]),
-            "total_work_orders": len(self.dispatcher.work_orders),
-            "last_fl_macro_f1": round(self.last_fl_results.get("best_macro_f1", 0.0), 4) if self.last_fl_results else None,
-        }
-
-    def get_telemetry_window(self, client_id: str, window: int = 50) -> Dict[str, Any]:
-        """Returns the recent historical telemetry stream for plotting."""
-        if client_id not in self.datasets or self.datasets[client_id].empty:
-            return {"client_id": client_id, "data": []}
-
-        df = self.datasets[client_id]
-        curr = self.current_step[client_id]
-        start_idx = max(0, curr - window)
-        end_idx = min(len(df), max(curr, start_idx + 1))
-
-        slice_df = df.iloc[start_idx:end_idx]
-
-        records = []
-        for _, row in slice_df.iterrows():
-            records.append({
-                "timestamp": str(row.get("timestamp", "")),
-                "temperature": round(float(row.get("temperature", 0.0)), 2),
-                "humidity": round(float(row.get("humidity", 0.0)), 2),
-                "vibration": round(float(row.get("vibration", 0.0)), 2),
-                "current": round(float(row.get("current", 0.0)), 2),
-                "rpm": round(float(row.get("rpm", 0.0)), 1),
-                "pressure": round(float(row.get("pressure", 0.0)), 2),
-                "failure": int(row.get("failure", 0)),
-            })
-
-        twin = self.twins[client_id]
-        current_state = twin.get_state_snapshot()
-        rul_pred = self.rul_estimators[client_id].predict_rul(
-            current_state.get("overall_health_index", 100.0),
-            twin.failure_probability,
-        )
-
-        return {
-            "client_id": client_id,
-            "current_step": curr,
-            "total_steps": len(df),
-            "state_snapshot": current_state,
-            "rul_prediction": rul_pred.to_dict(),
-            "telemetry": records,
-        }
-
-    def step(self, client_id: Optional[str] = None, steps: int = 1) -> Dict[str, Any]:
-        """
-        Advances telemetry stream for one or all clients and updates Digital Twins.
-        """
-        targets = [client_id] if client_id and client_id in self.client_ids else self.client_ids
-        dispatched_orders = []
-
-        for cid in targets:
-            df = self.datasets.get(cid)
-            if df is None or df.empty:
-                continue
-
-            total_len = len(df)
-            twin = self.twins[cid]
-
-            for _ in range(steps):
-                curr = self.current_step[cid]
-                if curr >= total_len:
-                    # Loop around for continuous real-time simulation
-                    curr = 0
-
-                row = df.iloc[curr].to_dict()
-                state = twin.ingest_telemetry_point(row)
-                self.current_step[cid] = curr + 1
-
-                # Check for prescriptive maintenance dispatch
-                rul_pred = self.rul_estimators[cid].predict_rul(
-                    state.get("overall_health_index", 100.0),
-                    twin.failure_probability,
-                )
-                wo = self.dispatcher.evaluate_twin(twin, rul_pred, current_tick=curr)
-                if wo:
-                    dispatched_orders.append(wo.to_dict())
-
-        return {
-            "status": "success",
-            "advanced_steps": steps,
-            "current_steps": self.current_step,
-            "new_work_orders": dispatched_orders,
-            "overview": self.get_overview(),
-        }
-
-    def reset_simulation(self, client_id: Optional[str] = None):
-        """Resets the streaming step to 0 and reinitializes digital twin."""
-        targets = [client_id] if client_id and client_id in self.client_ids else self.client_ids
-        for cid in targets:
-            profile = CLIENT_PROFILES.get(cid, CLIENT_PROFILES["client_1"])
-            self.twins[cid] = MachineDigitalTwin(
-                client_id=cid,
-                profile=profile,
-                window_size=30,
-                device=self.device,
-            )
-            self.rul_estimators[cid] = RULEstimator(client_id=cid)
-            self.what_if_simulators[cid] = WhatIfSimulator(self.rul_estimators[cid])
-            self.current_step[cid] = 0
-
-            df = self.datasets.get(cid)
-            if df is not None and len(df) >= 30:
-                for i in range(30):
-                    row = df.iloc[i].to_dict()
-                    self.twins[cid].ingest_telemetry_point(row)
-                self.current_step[cid] = 30
-
-        return {"status": "success", "reset_clients": targets, "current_steps": self.current_step}
-
-    def run_what_if(
-        self,
-        client_id: str,
-        scenario_key: Optional[str] = None,
-        rpm_multiplier: float = 1.0,
-        load_multiplier: float = 1.0,
-        ambient_temp_delta: float = 0.0,
-        horizon_minutes: float = 60.0,
+    def get_hardware_telemetry(
+        self, results: int = 150, window: str = "all"
     ) -> Dict[str, Any]:
-        """Runs a What-If stress simulation on the specified machine."""
-        if client_id not in self.twins:
-            return {"error": f"Invalid client_id: {client_id}"}
+        """Fetch, normalize, and analyze live edge device telemetry."""
+        raw_feeds, channel_info, source = self.adapter.fetch_raw_feeds(results=results)
+        norm_res = self.adapter.normalize(raw_feeds)
+        samples = norm_res["samples"]
+        health = norm_res["health"]
 
-        simulator = self.what_if_simulators[client_id]
-        twin = self.twins[client_id]
-
-        if scenario_key and scenario_key in simulator.PRESETS:
-            scenario = simulator.PRESETS[scenario_key]
-        else:
-            scenario = SimulationScenario(
-                name=f"Custom Sandbox ({rpm_multiplier:+.0%} RPM, {load_multiplier:+.0%} Load)",
-                description=f"User-configured load: {rpm_multiplier}x RPM, {load_multiplier}x torque, +{ambient_temp_delta}°C temp.",
-                rpm_multiplier=rpm_multiplier,
-                load_multiplier=load_multiplier,
-                ambient_temp_delta=ambient_temp_delta,
-                horizon_minutes=horizon_minutes,
-            )
-
-        result = simulator.simulate(twin, scenario)
-        return {
-            "client_id": client_id,
-            "machine_name": getattr(twin.profile, "machine_type", client_id),
-            "simulation": result,
-        }
-
-    def get_work_orders(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Returns all dispatched maintenance work orders."""
-        orders = self.dispatcher.work_orders
-        if status:
-            orders = [o for o in orders if o.status.upper() == status.upper()]
-        return [o.to_dict() for o in orders]
-
-    def update_work_order_status(self, work_order_id: str, new_status: str) -> Dict[str, Any]:
-        """Updates work order state (OPEN, ASSIGNED, RESOLVED)."""
-        valid_statuses = {"OPEN", "ASSIGNED", "RESOLVED"}
-        if new_status.upper() not in valid_statuses:
-            return {"error": f"Invalid status {new_status}. Must be one of {valid_statuses}"}
-
-        for order in self.dispatcher.work_orders:
-            if order.work_order_id == work_order_id:
-                order.status = new_status.upper()
-                return {"status": "success", "work_order": order.to_dict()}
-
-        return {"error": f"Work order {work_order_id} not found"}
-
-    def _prepare_fast_fl_loaders(self, sample_size: int = 400) -> Dict[str, Dict[str, DataLoader]]:
-        """
-        Creates lightweight sliding-window DataLoaders from client datasets for fast interactive FL runs.
-        """
-        prep = TimeSeriesPreprocessor(window_size=30, stride=5, lookahead_horizon=12)
-        loaders = {}
-
-        for cid in self.client_ids:
-            df = self.datasets.get(cid)
-            if df is None or df.empty:
-                continue
-
-            # Take a representative slice
-            sub_df = df.iloc[:sample_size].copy()
-            splits = prep.prepare_client_dataset(sub_df, train_ratio=0.70, val_ratio=0.15)
-
-            X_tr = torch.tensor(splits["X_train"], dtype=torch.float32)
-            y_tr = torch.tensor(splits["y_train"], dtype=torch.float32).unsqueeze(1)
-            X_te = torch.tensor(splits["X_test"], dtype=torch.float32)
-            y_te = torch.tensor(splits["y_test"], dtype=torch.float32).unsqueeze(1)
-
-            train_ds = TensorDataset(X_tr, y_tr)
-            test_ds = TensorDataset(X_te, y_te)
-
-            train_loader = DataLoader(train_ds, batch_size=16, shuffle=True)
-            test_loader = DataLoader(test_ds, batch_size=16, shuffle=False)
-
-            loaders[cid] = {
-                "train": train_loader,
-                "val": test_loader,
-                "test": test_loader,
-                "num_train": len(train_ds),
-                "num_test": len(test_ds),
+        if not samples:
+            return {
+                "status": "empty",
+                "source": source,
+                "channel_id": self.adapter.channel_id,
+                "online": False,
+                "age_seconds": None,
+                "latest": None,
+                "series": [],
+                "stats": {},
+                "baseline": {},
+                "anomalies": [],
+                "reconciliation": {},
+                "events": [],
+                "correlations": {},
+                "data_quality": {},
+                "twin": {"health_index": 100.0, "state": "UNKNOWN", "subsystems": {}},
+                "rul": {"rul_status": "INSUFFICIENT_DATA", "rul_hours": None},
             }
 
-        return loaders
+        # Window filtering
+        if window in ("1h", "24h") and len(samples) > 1:
+            from datetime import datetime
+            last_dt = datetime.fromisoformat(samples[-1]["timestamp"].replace("Z", "+00:00"))
+            cutoff_seconds = 3600.0 if window == "1h" else 86400.0
+            filtered = [
+                s for s in samples
+                if (last_dt - datetime.fromisoformat(s["timestamp"].replace("Z", "+00:00"))).total_seconds() <= cutoff_seconds
+            ]
+            if len(filtered) >= 5:
+                samples = filtered
 
-    def run_federated_training(
-        self,
-        strategy_name: str = "FedProx",
-        num_rounds: int = 3,
-        local_epochs: int = 1,
-        learning_rate: float = 0.001,
-        enable_dp: bool = True,
-        clip_norm: float = 1.0,
-        noise_multiplier: float = 0.05,
-        enable_secagg: bool = True,
-        mu: float = 0.01,
-    ) -> Dict[str, Any]:
-        """
-        Executes an on-demand Federated Learning training run and records convergence metrics.
-        """
-        loaders_map = self._prepare_fast_fl_loaders(sample_size=500)
-        if not loaders_map:
-            return {"error": "No dataset loaders available for federated training."}
+        # Statistical analysis
+        baseline = compute_robust_baseline(samples)
+        stats = compute_descriptive_stats(samples)
 
-        # Build Global Model
-        global_model = CNNLSTMPredictor(num_features=9, window_size=30).to(self.device)
+        # Anomaly detection & clustering
+        anom_res = detect_anomalies(samples, baseline)
+        anomalies = anom_res["anomalies"]
+        reconciliation = anom_res["reconciliation"]
+        episodes = detect_anomaly_episodes(samples, anomalies)
 
-        # Build Client Nodes
-        clients = []
-        for cid, ld in loaders_map.items():
-            local_model = CNNLSTMPredictor(num_features=9, window_size=30).to(self.device)
-            local_model.set_weights(global_model.get_weights())
+        # Trends & correlations
+        trends = analyze_trends(samples)
+        correlations = compute_correlations(samples)
 
-            c_mu = mu if strategy_name.lower() == "fedprox" else 0.0
-            client = FederatedEdgeClient(
-                client_id=cid,
-                model=local_model,
-                train_loader=ld["train"],
-                val_loader=ld["val"],
-                test_loader=ld["test"],
-                device=self.device,
-                lr=learning_rate,
-                mu=c_mu,
-            )
-            clients.append(client)
+        # Data quality report
+        data_quality = generate_data_quality_report(samples, health["gaps"])
 
-        # Strategy Selection
-        if strategy_name.lower() == "fedprox":
-            strategy = FedProxStrategy(mu=mu)
-        else:
-            strategy = FedAvgStrategy()
+        # Health series
+        health_series = compute_live_health_series(samples, baseline)
+        enriched_samples = []
+        for s, h in zip(samples, health_series):
+            merged = dict(s)
+            merged["health_index"] = h["health_index"]
+            merged["vibration_health"] = h["vibration_health"]
+            merged["thermal_health"] = h["thermal_health"]
+            merged["environment_health"] = h["environment_health"]
+            merged["electrical_health"] = h["electrical_health"]
+            enriched_samples.append(merged)
 
-        server = FederatedServer(
-            global_model=global_model,
-            clients=clients,
-            strategy=strategy,
-            device=self.device,
-        )
+        latest_sample = enriched_samples[-1]
+        current_hi = latest_sample["health_index"]
+        twin_state = "OPTIMAL" if current_hi >= 80.0 else "WARNING" if current_hi >= 50.0 else "CRITICAL"
 
-        results = server.fit(
-            num_rounds=num_rounds,
-            local_epochs=local_epochs,
-            enable_dp=enable_dp,
-            clip_norm=clip_norm,
-            noise_multiplier=noise_multiplier,
-            enable_secagg=enable_secagg,
-            verbose=False,
-        )
+        twin = {
+            "machine_id": "ESP32_BENCH_01",
+            "machine_name": "ESP32 Industrial IoT Bench Node",
+            "health_index": current_hi,
+            "state": twin_state,
+            "subsystems": {
+                "vibration": latest_sample["vibration_health"],
+                "thermal": latest_sample["thermal_health"],
+                "environment": latest_sample["environment_health"],
+                "electrical": latest_sample["electrical_health"],
+            },
+            "esp32_hardware": {
+                "anomaly_flag": latest_sample.get("esp32_anomaly", 0),
+                "alert_flag": latest_sample.get("esp32_alert", 0),
+                "status_text": latest_sample.get("status", ""),
+            },
+        }
 
-        self.last_fl_results = results
-
-        # Format clean response for frontend charts
-        convergence_series = []
-        for entry in results.get("history", []):
-            convergence_series.append({
-                "round": entry.get("round"),
-                "avg_train_loss": round(float(entry.get("avg_train_loss", 0.0)), 4),
-                "macro_f1": round(float(entry.get("macro_f1", 0.0)), 4),
-                "macro_recall": round(float(entry.get("macro_recall", 0.0)), 4),
-                "macro_precision": round(float(entry.get("macro_precision", 0.0)), 4),
-                "epsilon": round(float(entry.get("epsilon", 0.0)), 3) if entry.get("epsilon") != float("inf") else 999.0,
-                "delta": float(entry.get("delta", 1e-5)),
-            })
+        # RUL estimation
+        rul = estimate_rul(samples, baseline)
 
         return {
             "status": "success",
-            "strategy": strategy_name,
-            "rounds_completed": len(convergence_series),
-            "best_macro_f1": round(float(results.get("best_macro_f1", 0.0)), 4),
-            "best_round": results.get("best_round", 1),
-            "final_epsilon": round(float(results.get("final_epsilon", 0.0)), 2) if results.get("final_epsilon") != float("inf") else "Unlimited",
-            "dp_enabled": enable_dp,
-            "secagg_enabled": enable_secagg,
-            "convergence": convergence_series,
-            "final_eval": results.get("final_eval", {}),
-        }
-
-    def resolve_machine_client_id(self, machine_id: str) -> str:
-        """
-        Maps an incoming machine_id (or alias) to an existing client_id in the factory fleet.
-        Supported mappings:
-          - 'client_1', 'client_2', 'client_3'
-          - 'CNC_MILL_01' -> 'client_1'
-          - 'HYDR_PRESS_02' / 'HYD_PRESS_02' -> 'client_2'
-          - 'TURB_COMP_03' / 'TURBO_COMP_03' -> 'client_3'
-        """
-        clean_id = str(machine_id).strip()
-        lower_id = clean_id.lower()
-        if lower_id in self.client_ids:
-            return lower_id
-
-        upper_id = clean_id.upper()
-        for cid, twin in self.twins.items():
-            t_mid = getattr(twin.profile, "machine_id", "").upper()
-            if t_mid == upper_id:
-                return cid
-
-        if "CNC" in upper_id or "MILL" in upper_id:
-            return "client_1"
-        elif "HYDR" in upper_id or "PRESS" in upper_id:
-            return "client_2"
-        elif "TURB" in upper_id or "COMP" in upper_id:
-            return "client_3"
-
-        return "client_1"
-
-    def ingest_telemetry(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Processes an incoming live hardware (ESP32_LIVE) or synthetic (SIMULATED) sample.
-        Validates the mapping to a Digital Twin, executes state synchronization,
-        updates physical health & RUL forecasts, evaluates work-order dispatch triggers,
-        and records the sample strictly into volatile in-memory storage.
-        """
-        machine_id = str(payload.get("machine_id", "UNKNOWN")).strip()
-        source = str(payload.get("source", "SIMULATED")).strip()
-        timestamp = str(payload.get("timestamp", datetime.now().isoformat()))
-
-        target_cid = self.resolve_machine_client_id(machine_id)
-        twin = self.twins.get(target_cid)
-        profile = getattr(twin, "profile", None) if twin else None
-
-        # Convert vibration_g to mm/s RMS for physical twin engine
-        # Standard calibration: 1g RMS vibration ≈ 9.81 mm/s RMS normalized scale
-        vib_g = float(payload["vibration_g"])
-        vib_mms = round(vib_g * 9.81, 3)
-
-        twin_telemetry = {
-            "timestamp": timestamp,
-            "machine_id": machine_id,
-            "temperature": float(payload["temperature_c"]),
-            "humidity": float(payload["humidity_pct"]),
-            "vibration": vib_mms,
-            "current": float(payload.get("current_a", getattr(profile.current, "mean", 18.5) if profile else 18.5)),
-            "rpm": float(payload.get("rpm", getattr(profile.rpm, "mean", 3850.0) if profile else 3850.0)),
-            "pressure": float(payload.get("pressure_bar", getattr(profile.pressure, "mean", 6.2) if profile else 6.2)),
-            "failure": 0,
-            # IMU Kinematic channels
-            "acceleration_x": float(payload["acceleration_x"]),
-            "acceleration_y": float(payload["acceleration_y"]),
-            "acceleration_z": float(payload["acceleration_z"]),
-            "gyro_x": float(payload["gyro_x"]),
-            "gyro_y": float(payload["gyro_y"]),
-            "gyro_z": float(payload["gyro_z"]),
-            "vibration_g": vib_g,
             "source": source,
-        }
-
-        twin_state = {}
-        rul_info = {}
-        dispatched_orders = []
-
-        if twin:
-            twin_state = twin.ingest_telemetry_point(twin_telemetry)
-            rul_estimator = self.rul_estimators.get(target_cid)
-            if rul_estimator:
-                rul_pred = rul_estimator.predict_rul(
-                    twin_state.get("overall_health_index", 100.0),
-                    twin.failure_probability,
-                )
-                rul_info = rul_pred.to_dict()
-
-                # Check for prescriptive maintenance dispatch
-                wo = self.dispatcher.evaluate_twin(twin, rul_pred)
-                if wo:
-                    dispatched_orders.append(wo.to_dict())
-
-        sample_record = {
-            "machine_id": machine_id,
-            "target_client_id": target_cid,
-            "source": source,
-            "timestamp": timestamp,
-            "sensors": {
-                "temperature_c": float(payload["temperature_c"]),
-                "humidity_pct": float(payload["humidity_pct"]),
-                "acceleration_x": float(payload["acceleration_x"]),
-                "acceleration_y": float(payload["acceleration_y"]),
-                "acceleration_z": float(payload["acceleration_z"]),
-                "gyro_x": float(payload["gyro_x"]),
-                "gyro_y": float(payload["gyro_y"]),
-                "gyro_z": float(payload["gyro_z"]),
-                "vibration_g": vib_g,
+            "channel_id": self.adapter.channel_id,
+            "channel_info": {
+                "name": channel_info.get("name", "Industrial IoT Bench Twin"),
+                "description": channel_info.get("description", "ESP32 Live Telemetry"),
+                "fields": {k: meta["label"] for k, meta in FIELD_MAPPING.items()},
             },
-            "digital_twin_sync": {
-                "overall_health_index": twin_state.get("overall_health_index"),
-                "operational_state": twin_state.get("operational_state"),
-                "rul_minutes": rul_info.get("rul_minutes"),
-            },
-            "storage": "in_memory",
-            "persisted": False,
-        }
-
-        self.latest_ingested_sample = sample_record
-        self.ingested_telemetry_history.append(sample_record)
-        if len(self.ingested_telemetry_history) > 1000:
-            self.ingested_telemetry_history.pop(0)
-        self.total_ingested_count += 1
-
-        return {
-            "status": "success",
-            "machine_id": machine_id,
-            "timestamp": timestamp,
-            "source": source,
-            "storage": "in_memory",
-            "persisted": False,
-            "target_client_id": target_cid,
-            "digital_twin": {
-                "overall_health_index": twin_state.get("overall_health_index"),
-                "operational_state": twin_state.get("operational_state"),
-                "rul_minutes": rul_info.get("rul_minutes"),
-                "primary_fault_subsystem": twin_state.get("primary_fault_subsystem"),
-            },
-            "new_work_orders": dispatched_orders,
-        }
-
-    def get_latest_ingested_sample(self) -> Dict[str, Any]:
-        """Returns the most recent live/simulated telemetry sample and buffer metadata."""
-        return {
-            "total_ingested": self.total_ingested_count,
-            "latest_sample": self.latest_ingested_sample,
-            "buffer_size": len(self.ingested_telemetry_history),
-            "storage": "in_memory",
+            "online": health["online"],
+            "age_seconds": health["age_seconds"],
+            "sample_interval_seconds": health["sample_interval_seconds"],
+            "offline_threshold_seconds": health["offline_threshold_seconds"],
+            "latest_timestamp": health["latest_timestamp"],
+            "latest": latest_sample,
+            "series": enriched_samples,
+            "stats": stats,
+            "baseline": baseline,
+            "anomalies": anomalies,
+            "reconciliation": reconciliation,
+            "events": episodes,
+            "trends": trends,
+            "correlations": correlations,
+            "data_quality": data_quality,
+            "twin": twin,
+            "rul": rul,
         }
 
 
-if __name__ == "__main__":
-    srv = DashboardService()
-    print("DashboardService initialized successfully.")
-    overview = srv.get_overview()
-    print(f"Fleet Status: {overview['fleet_status']}, Fleet Health: {overview['fleet_health_index']}%")
+# Alias for backward compatibility
+DashboardService = LiveDashboardService
 

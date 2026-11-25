@@ -4,12 +4,13 @@ Exposes RESTful APIs for telemetry monitoring, digital twin state sync, what-if 
 prescriptive maintenance work orders, and interactive federated learning runs.
 """
 
+import csv
 import sys
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Optional
-from fastapi import FastAPI, HTTPException, Query
+from typing import Any, Dict, List, Optional, Tuple, Union
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,8 +25,44 @@ if str(PROJECT_ROOT) not in sys.path:
 
 try:
     from .service import DashboardService
+    from .thingspeak import ThingSpeakAdapter, FIELD_MAPPING
+    from .live_analytics import (
+        compute_descriptive_stats,
+        compute_robust_baseline,
+        detect_anomalies,
+        detect_anomaly_episodes,
+        analyze_trends,
+        compute_correlations,
+        generate_data_quality_report,
+    )
+    from .live_rul import (
+        compute_live_health_series,
+        compute_sample_subsystems,
+        compute_composite_health_index,
+        estimate_rul,
+        DEFAULT_WARNING_THRESHOLD,
+        DEFAULT_FAILURE_THRESHOLD,
+    )
 except (ImportError, ValueError):
     from src.dashboard.service import DashboardService
+    from src.dashboard.thingspeak import ThingSpeakAdapter, FIELD_MAPPING
+    from src.dashboard.live_analytics import (
+        compute_descriptive_stats,
+        compute_robust_baseline,
+        detect_anomalies,
+        detect_anomaly_episodes,
+        analyze_trends,
+        compute_correlations,
+        generate_data_quality_report,
+    )
+    from src.dashboard.live_rul import (
+        compute_live_health_series,
+        compute_sample_subsystems,
+        compute_composite_health_index,
+        estimate_rul,
+        DEFAULT_WARNING_THRESHOLD,
+        DEFAULT_FAILURE_THRESHOLD,
+    )
 
 
 app = FastAPI(
@@ -240,6 +277,247 @@ def get_benchmark_summary():
         "has_figures": (PROJECT_ROOT / "docs" / "figures" / "fl_convergence.png").exists(),
         "report_markdown": content,
     }
+
+
+# ============================================================================
+# Live Hardware Telemetry & Real ESP32 Digital Twin Endpoints
+# ============================================================================
+thingspeak_adapter = ThingSpeakAdapter()
+
+
+def _get_live_hardware_data(results: int = 100, window: str = "all") -> Dict[str, Any]:
+    """
+    Fetch, normalize, analyze, and compute RUL for live ESP32 hardware via ThingSpeak.
+    Stateless and safe for Vercel Serverless.
+    """
+    try:
+        raw_feeds, channel_info, source = thingspeak_adapter.fetch_raw_feeds(results=results)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Unable to retrieve telemetry from ThingSpeak upstream: {str(e)}",
+        )
+
+    norm_res = thingspeak_adapter.normalize(raw_feeds)
+    samples = norm_res["samples"]
+    health = norm_res["health"]
+
+    if not samples:
+        return {
+            "status": "empty",
+            "source": source,
+            "channel_id": thingspeak_adapter.channel_id,
+            "online": False,
+            "age_seconds": None,
+            "latest": None,
+            "series": [],
+            "stats": {},
+            "baseline": {},
+            "anomalies": [],
+            "reconciliation": {},
+            "events": [],
+            "correlations": {},
+            "data_quality": {},
+            "twin": {"health_index": 100.0, "state": "UNKNOWN", "subsystems": {}},
+            "rul": {"rul_status": "INSUFFICIENT_DATA", "rul_hours": None},
+        }
+
+    # Window filtering (1h, 24h, all)
+    if window in ("1h", "24h") and len(samples) > 1:
+        last_dt = datetime.fromisoformat(samples[-1]["timestamp"].replace("Z", "+00:00"))
+        cutoff_seconds = 3600.0 if window == "1h" else 86400.0
+        filtered_samples = [
+            s for s in samples
+            if (last_dt - datetime.fromisoformat(s["timestamp"].replace("Z", "+00:00"))).total_seconds() <= cutoff_seconds
+        ]
+        # Use filtered if it has enough samples, else fall back to all
+        if len(filtered_samples) >= 5:
+            samples = filtered_samples
+
+    # Baseline & Stats
+    baseline = compute_robust_baseline(samples)
+    stats = compute_descriptive_stats(samples)
+
+    # Anomaly Detection & Episodes
+    anom_res = detect_anomalies(samples, baseline)
+    anomalies = anom_res["anomalies"]
+    reconciliation = anom_res["reconciliation"]
+    episodes = detect_anomaly_episodes(samples, anomalies)
+
+    # Trend & Correlation
+    trends = analyze_trends(samples)
+    correlations = compute_correlations(samples)
+
+    # Data Quality Report
+    data_quality = generate_data_quality_report(samples, health["gaps"])
+
+    # Health Index Series & Subsystems
+    health_series = compute_live_health_series(samples, baseline)
+    
+    # Merge health index and subsystem scores back into each sample
+    enriched_samples = []
+    for s, h in zip(samples, health_series):
+        merged = dict(s)
+        merged["health_index"] = h["health_index"]
+        merged["vibration_health"] = h["vibration_health"]
+        merged["thermal_health"] = h["thermal_health"]
+        merged["environment_health"] = h["environment_health"]
+        merged["electrical_health"] = h["electrical_health"]
+        enriched_samples.append(merged)
+
+    # Latest Digital Twin state
+    latest_sample = enriched_samples[-1]
+    current_hi = latest_sample["health_index"]
+    twin_state = "OPTIMAL" if current_hi >= 80.0 else "WARNING" if current_hi >= 50.0 else "CRITICAL"
+
+    twin = {
+        "machine_id": "ESP32_BENCH_01",
+        "machine_name": "ESP32 Industrial IoT Bench Node",
+        "health_index": current_hi,
+        "state": twin_state,
+        "subsystems": {
+            "vibration": latest_sample["vibration_health"],
+            "thermal": latest_sample["thermal_health"],
+            "environment": latest_sample["environment_health"],
+            "electrical": latest_sample["electrical_health"],
+        },
+        "esp32_hardware": {
+            "anomaly_flag": latest_sample.get("esp32_anomaly", 0),
+            "alert_flag": latest_sample.get("esp32_alert", 0),
+            "status_text": latest_sample.get("status", ""),
+        },
+    }
+
+    # RUL Prediction
+    rul = estimate_rul(samples, baseline)
+
+    # Optional Idempotent Prescriptive Work Order
+    # When health dips below warning threshold (60) or RUL < 1.0 hr, dispatch work order
+    if current_hi < DEFAULT_WARNING_THRESHOLD and hasattr(service, "dispatcher"):
+        episode_ref = episodes[-1]["episode_id"] if episodes else "EP-LIVE"
+        wo_id = f"WO-ESP32-{episode_ref}"
+        if wo_id not in service.dispatcher.work_orders:
+            from src.digital_twin.maintenance_dispatcher import MaintenanceWorkOrder
+            weak_sub = "vibration" if (latest_sample["vibration_health"] or 100) < 60 else "thermal"
+            wo = MaintenanceWorkOrder(
+                work_order_id=wo_id,
+                machine_id="ESP32_BENCH_01",
+                machine_name="ESP32 Bench Edge Node",
+                timestamp=latest_sample["timestamp"],
+                urgency="P1_CRITICAL" if current_hi < 35.0 else "P2_HIGH",
+                affected_subsystem=weak_sub,
+                machine_health_index=current_hi,
+                estimated_rul_minutes=rul.get("rul_minutes") or 60.0,
+                recommended_action=rul.get("recommended_action") or "Inspect bench motor mounting and MPU6050 wiring.",
+                estimated_downtime_hours=0.5,
+                required_spare_parts=["MPU6050 Vibration Sensor", "12V DC Motor", "N-MOSFET Driver"],
+                technician_skill_level="Level 1 Edge Technician",
+                safety_precautions=["Disconnect 12V DC motor power rail", "Inspect 3.3V GPIO lines"],
+                status="OPEN",
+            )
+            service.dispatcher.work_orders[wo_id] = wo
+
+    return {
+        "status": "success",
+        "source": source,
+        "channel_id": thingspeak_adapter.channel_id,
+        "channel_info": {
+            "name": channel_info.get("name", "Industrial IoT Bench Twin"),
+            "description": channel_info.get("description", "ESP32 Live Telemetry"),
+            "fields": {k: meta["label"] for k, meta in FIELD_MAPPING.items()},
+        },
+        "online": health["online"],
+        "age_seconds": health["age_seconds"],
+        "sample_interval_seconds": health["sample_interval_seconds"],
+        "offline_threshold_seconds": health["offline_threshold_seconds"],
+        "latest_timestamp": health["latest_timestamp"],
+        "latest": latest_sample,
+        "series": enriched_samples,
+        "stats": stats,
+        "baseline": baseline,
+        "anomalies": anomalies,
+        "reconciliation": reconciliation,
+        "events": episodes,
+        "trends": trends,
+        "correlations": correlations,
+        "data_quality": data_quality,
+        "twin": twin,
+        "rul": rul,
+    }
+
+
+@app.get("/api/live/hardware")
+def get_live_hardware(
+    results: int = Query(100, ge=10, le=8000),
+    window: str = Query("all", pattern="^(1h|24h|all)$"),
+):
+    """
+    Returns full telemetry stream, robust analytics, anomaly episodes,
+    digital twin state, and RUL forecast for the real ESP32 edge device.
+    """
+    return _get_live_hardware_data(results=results, window=window)
+
+
+@app.get("/api/live/rul")
+def get_live_rul(
+    results: int = Query(100, ge=10, le=8000),
+    window: str = Query("all", pattern="^(1h|24h|all)$"),
+):
+    """
+    Returns lightweight RUL prediction and digital twin state snapshot.
+    """
+    data = _get_live_hardware_data(results=results, window=window)
+    return {
+        "status": data["status"],
+        "online": data["online"],
+        "age_seconds": data["age_seconds"],
+        "twin": data["twin"],
+        "rul": data["rul"],
+        "source": data["source"],
+    }
+
+
+@app.get("/api/live/export.csv")
+def export_live_csv(
+    results: int = Query(500, ge=10, le=8000),
+):
+    """
+    Export the analyzed telemetry time series and health metrics as CSV.
+    """
+    data = _get_live_hardware_data(results=results, window="all")
+    series = data.get("series", [])
+
+    fields = [
+        "timestamp",
+        "entry_id",
+        "temperature_c",
+        "humidity_pct",
+        "temp_secondary_c",
+        "pressure_hpa",
+        "vibration_g",
+        "current_a",
+        "esp32_anomaly",
+        "esp32_alert",
+        "health_index",
+        "vibration_health",
+        "thermal_health",
+        "environment_health",
+        "electrical_health",
+        "status",
+    ]
+
+    import io
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for row in series:
+        writer.writerow(row)
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="live_hardware_telemetry.csv"'},
+    )
 
 
 # Health check

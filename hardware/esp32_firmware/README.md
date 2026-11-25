@@ -7,7 +7,9 @@ Industrial IoT Predictive Maintenance & Physics-Grounded Digital Twin Platform
 
 ## 1. Overview & Architecture
 
-This firmware turns an ESP32 microcontroller into a physical edge condition monitoring node. It continuously samples high-frequency acceleration and gyroscope data from an MPU6050 sensor, measures ambient temperature and humidity using a DHT11 sensor, extracts mathematically grounded dynamic vibration features, synchronizes UTC time via SNTP, and transmits formatted JSON telemetry via HTTP POST to the backend FastAPI ingestion pipeline (`POST /api/telemetry/ingest`).
+The edge firmware layer supports two ingestion paradigms:
+1. **ThingSpeak Cloud Ingestion (`esp32_thingspeak.ino`)**: Transmits telemetry to ThingSpeak Channel 3591448 every 20s. The FastAPI backend polls and caches data from ThingSpeak statelessly.
+2. **Direct Backend Ingestion (`esp32_firmware.ino`)**: Transmits formatted JSON directly to `POST /api/telemetry/ingest`.
 
 ```
  +--------------------------------------------------------------------------+
@@ -27,23 +29,40 @@ This firmware turns an ESP32 microcontroller into a physical edge condition moni
  |  | Firmware Engine:                                                   |  |
  |  |  1. Windowed burst sampling (100 samples @ 100 Hz)                 |  |
  |  |  2. Static gravity (DC) removal across X, Y, Z axes                |  |
- |  |  3. Dynamic AC acceleration Root-Mean-Square (RMS) computation     |  |
- |  |  4. SNTP UTC ISO-8601 timestamping                                 |  |
- |  |  5. JSON serialization (ArduinoJson)                               |  |
- |  |  6. Non-blocking Wi-Fi auto-reconnection                           |  |
- |  |  7. HTTP POST client with strict ACK verification                  |  |
+ |  |  3. Dynamic AC acceleration Root-Mean-Square (RMS) in g            |  |
+ |  |  4. Edge anomaly rule trip & buzzer trigger (>0.15g / >0.25g)      |  |
+ |  |  5. 20s rate-limited transmission to ThingSpeak update endpoint    |  |
  |  +--------------------------------------------------------------------+  |
  +-----------------------------------┬--------------------------------------+
-                                     │  HTTP POST (Wi-Fi 802.11 b/g/n)
+                                     │  HTTP GET / POST (Wi-Fi 802.11 b/g/n)
                                      ▼
                      +-------------------------------+
-                     |   FastAPI Backend Gateway     |
-                     |   /api/telemetry/ingest       |
-                     |   - Pydantic Bound Validation |
-                     |   - Digital Twin State Sync   |
-                     |   - Health & RUL Estimator    |
+                     |     ThingSpeak IoT Cloud      |
+                     |     Channel ID: 3591448       |
+                     +---------------┬---------------+
+                                     │ REST API (10s server cache)
+                                     ▼
+                     +-------------------------------+
+                     |    FastAPI Live Gateway       |
+                     |    /api/live/hardware         |
+                     |    - Robust Z-Score, EWMA     |
+                     |    - Honest Wear RUL Model    |
                      +-------------------------------+
 ```
+
+### ThingSpeak Telemetry Channel Fields
+
+| Field | Parameter | Sensor / Source | Status | Description |
+| :--- | :--- | :--- | :---: | :--- |
+| `field1` | `temperature_c` | DHT11 | **CONFIRMED** | Ambient temperature (°C) |
+| `field2` | `humidity_pct` | DHT11 | **CONFIRMED** | Relative air humidity (% RH) |
+| `field3` | `temp_secondary_c` | Aux / Internal | *UNCONFIRMED* | Secondary temperature channel |
+| `field4` | `pressure_hpa` | Barometer / Seal | *UNCONFIRMED* | Barometric pressure baseline (~994 hPa) |
+| `field5` | `vibration_g` | MPU6050 | **CONFIRMED** | Dynamic vibration RMS in g (gravity removed) |
+| `field6` | `current_a` | ACS712 | **RESERVED** | Motor current in A (NA if disconnected) |
+| `field7` | `esp32_anomaly` | ESP32 Firmware | **CONFIRMED** | Edge anomaly trip flag (0 or 1) |
+| `field8` | `esp32_alert` | ESP32 Firmware | **CONFIRMED** | Buzzer / red LED alarm flag (0 or 1) |
+| `status` | `status_text` | ESP32 Firmware | **CONFIRMED** | Machine status string |
 
 ---
 

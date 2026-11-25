@@ -48,17 +48,26 @@
 
     <!-- Navigation Tabs -->
     <nav class="tab-bar" id="tab-bar">
-      <button class="tab-btn active" data-tab="tab-twins" id="btn-tab-twins">
+      <button class="tab-btn active" data-tab="tab-live" id="btn-tab-live">
+        <span class="live-pulse-dot"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        Live Hardware Twin
+        <span class="badge badge-live">LIVE</span>
+      </button>
+      <button class="tab-btn" data-tab="tab-twins" id="btn-tab-twins">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        Plant Fleet & Digital Twins
+        Plant Fleet & Twins
+        <span class="badge badge-simulated">SIMULATED</span>
       </button>
       <button class="tab-btn" data-tab="tab-federated" id="btn-tab-federated">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
         Federated Learning Control Room
+        <span class="badge badge-simulated">SIMULATED</span>
       </button>
       <button class="tab-btn" data-tab="tab-whatif" id="btn-tab-whatif">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         "What-If" Stress Sandbox
+        <span class="badge badge-simulated">SIMULATED</span>
       </button>
       <button class="tab-btn" data-tab="tab-maintenance" id="btn-tab-maintenance">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
@@ -68,14 +77,452 @@
       <button class="tab-btn" data-tab="tab-benchmark" id="btn-tab-benchmark">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
         Research Benchmarks & Non-IID
+        <span class="badge badge-simulated">SIMULATED</span>
       </button>
     </nav>
 
     <!-- Main Content Area -->
     <main class="content-container">
       
-      <!-- TAB 1: FLEET & DIGITAL TWINS -->
-      <section class="tab-pane active" id="tab-twins">
+
+      <!-- TAB 0: LIVE HARDWARE DIGITAL TWIN -->
+      <section class="tab-pane active" id="tab-live">
+        <!-- Live Ribbon -->
+        <div class="controls-ribbon">
+          <div class="ribbon-group" style="align-items: center;">
+            <span class="ribbon-label">Telemetry Source:</span>
+            <span id="live-conn-badge" class="status-badge status-badge-live">
+              <span class="live-pulse-dot"></span>
+              <span id="live-conn-status-text">INITIALIZING</span>
+            </span>
+            <span id="live-channel-info" class="font-mono" style="font-size: 12px; color: #64748b; margin-left: 10px;">Channel 3591448 &bull; ESP32 Bench</span>
+            <span class="font-mono" style="font-size: 11px; color: #94a3b8; margin-left: 8px;">Updated: <span id="live-last-updated">--</span></span>
+          </div>
+          <div class="ribbon-group">
+            <span class="ribbon-label">Window:</span>
+            <select id="live-window-select" class="select-input" style="padding: 4px 10px; font-size: 12px;">
+              <option value="all" selected>All Samples (Historical)</option>
+              <option value="24h">Last 24 Hours</option>
+              <option value="1h">Last 1 Hour</option>
+            </select>
+            <button class="btn btn-secondary" id="btn-live-refresh" style="padding: 4px 12px; font-size: 12px;">&#8635; Refresh</button>
+            <button class="btn btn-primary" id="btn-live-export" style="padding: 4px 12px; font-size: 12px;">&darr; Export CSV</button>
+          </div>
+        </div>
+
+        <!-- Live KPI Cards Grid -->
+        <div class="live-kpi-grid">
+          <div class="live-kpi-card">
+            <div class="kpi-title">Vibration RMS (MPU6050)</div>
+            <div class="kpi-value" id="live-kpi-vib">--</div>
+            <div class="kpi-subtext">
+              <span id="live-kpi-vib-range">min -- &bull; max --</span>
+              <span id="live-kpi-vib-trend" class="trend-indicator">--</span>
+            </div>
+          </div>
+          <div class="live-kpi-card">
+            <div class="kpi-title">Ambient Temp (DHT11)</div>
+            <div class="kpi-value" id="live-kpi-temp">--</div>
+            <div class="kpi-subtext">
+              <span id="live-kpi-temp-range">min -- &bull; max --</span>
+              <span id="live-kpi-temp-trend" class="trend-indicator">--</span>
+            </div>
+          </div>
+          <div class="live-kpi-card">
+            <div class="kpi-title">Rel. Humidity (DHT11)</div>
+            <div class="kpi-value" id="live-kpi-hum">--</div>
+            <div class="kpi-subtext">
+              <span id="live-kpi-hum-range">min -- &bull; max --</span>
+              <span id="live-kpi-hum-trend" class="trend-indicator">--</span>
+            </div>
+          </div>
+          <div class="live-kpi-card">
+            <div class="kpi-title">
+              <span>Field 3 (Temp 2)</span>
+              <span class="kpi-unconfirmed-tag">Unconfirmed</span>
+            </div>
+            <div class="kpi-value" id="live-kpi-temp2">--</div>
+            <div class="kpi-subtext">
+              <span>Secondary Temp</span>
+              <span>&plusmn;0.2&deg;C drift</span>
+            </div>
+          </div>
+          <div class="live-kpi-card">
+            <div class="kpi-title">
+              <span>Field 4 (Pressure?)</span>
+              <span class="kpi-unconfirmed-tag">Unconfirmed</span>
+            </div>
+            <div class="kpi-value" id="live-kpi-press">--</div>
+            <div class="kpi-subtext">
+              <span>Barometric / Seal</span>
+              <span>hPa baseline</span>
+            </div>
+          </div>
+          <div class="live-kpi-card">
+            <div class="kpi-title">Motor Current (ACS712)</div>
+            <div class="kpi-value text-muted-badge" id="live-kpi-curr">Not connected</div>
+            <div class="kpi-subtext">
+              <span>Electrical Subsystem</span>
+              <span>Auto-activates on data</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Digital Twin Diagram + RUL Box -->
+        <div class="live-twin-container">
+          <!-- Interactive SVG Digital Twin -->
+          <div class="live-svg-wrapper">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <h3 style="font-size: 14px; font-weight: 600; margin: 0;">Physical Bench Digital Twin Schematic</h3>
+              <span style="font-size: 11px; color: #64748b;">Click any component to inspect telemetry & health</span>
+            </div>
+            <div style="position: relative; width: 100%;">
+              <svg id="live-twin-svg" viewBox="0 0 760 380" style="width: 100%; height: auto; border-radius: 8px; background: #0f172a;">
+                <!-- Bus Wiring Lines -->
+                <path d="M 140 180 L 260 180" stroke="#38bdf8" stroke-width="3" stroke-dasharray="4,2" opacity="0.6" />
+                <path d="M 360 180 L 470 180" stroke="#f59e0b" stroke-width="3" opacity="0.7" />
+                <path d="M 540 180 L 620 180" stroke="#10b981" stroke-width="4" opacity="0.8" />
+                <path d="M 140 130 L 140 160" stroke="#ec4899" stroke-width="2" />
+                <path d="M 140 200 L 140 240" stroke="#8b5cf6" stroke-width="2" />
+
+                <!-- ESP32 Microcontroller Node -->
+                <g id="svg-comp-esp32" class="svg-comp">
+                  <rect x="50" y="120" width="90" height="120" rx="6" fill="#1e293b" stroke="#475569" stroke-width="2" />
+                  <rect x="65" y="135" width="60" height="55" rx="3" fill="#334155" />
+                  <text x="95" y="165" fill="#94a3b8" font-family="monospace" font-size="9" font-weight="bold" text-anchor="middle">ESP-WROOM-32</text>
+                  <!-- WiFi symbol -->
+                  <path d="M 85 145 A 10 10 0 0 1 105 145" stroke="#38bdf8" stroke-width="1.5" fill="none" />
+                  <circle cx="95" cy="148" r="1.5" fill="#38bdf8" />
+                  <text x="95" y="215" fill="#ffffff" font-family="sans-serif" font-size="11" font-weight="600" text-anchor="middle">ESP32 Edge</text>
+                  <text x="95" y="228" fill="#38bdf8" font-family="monospace" font-size="8" text-anchor="middle">240MHz Wi-Fi</text>
+                </g>
+
+                <!-- DHT11 Sensor -->
+                <g id="svg-comp-dht" class="svg-comp">
+                  <rect x="95" y="35" width="90" height="65" rx="5" fill="#0284c7" stroke="#38bdf8" stroke-width="1.5" />
+                  <!-- Grid holes -->
+                  <circle cx="120" cy="55" r="2" fill="#0369a1" />
+                  <circle cx="140" cy="55" r="2" fill="#0369a1" />
+                  <circle cx="160" cy="55" r="2" fill="#0369a1" />
+                  <circle cx="130" cy="65" r="2" fill="#0369a1" />
+                  <circle cx="150" cy="65" r="2" fill="#0369a1" />
+                  <text x="140" y="88" fill="#ffffff" font-family="sans-serif" font-size="10" font-weight="600" text-anchor="middle">DHT11 Sensor</text>
+                </g>
+
+                <!-- MPU6050 Accelerometer / Vibration Sensor -->
+                <g id="svg-comp-mpu" class="svg-comp">
+                  <rect x="95" y="270" width="90" height="65" rx="5" fill="#1e1b4b" stroke="#6366f1" stroke-width="1.5" />
+                  <rect x="125" y="285" width="30" height="20" fill="#312e81" stroke="#818cf8" stroke-width="1" />
+                  <text x="140" y="298" fill="#e0e7ff" font-family="monospace" font-size="8" text-anchor="middle">MPU</text>
+                  <text x="140" y="323" fill="#ffffff" font-family="sans-serif" font-size="10" font-weight="600" text-anchor="middle">MPU6050 (Vib)</text>
+                </g>
+
+                <!-- N-MOSFET Driver Module -->
+                <g id="svg-comp-mosfet" class="svg-comp">
+                  <rect x="260" y="145" width="100" height="70" rx="5" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5" />
+                  <!-- Heatsink tabs -->
+                  <rect x="275" y="155" width="12" height="25" fill="#64748b" />
+                  <rect x="295" y="155" width="12" height="25" fill="#64748b" />
+                  <rect x="315" y="155" width="12" height="25" fill="#64748b" />
+                  <text x="310" y="202" fill="#ffffff" font-family="sans-serif" font-size="10" font-weight="600" text-anchor="middle">N-MOSFET Driver</text>
+                </g>
+
+                <!-- ACS712 Current Sensor -->
+                <g id="svg-comp-acs" class="svg-comp">
+                  <rect x="390" y="145" width="90" height="70" rx="5" fill="#064e3b" stroke="#10b981" stroke-width="1.5" />
+                  <!-- Screw terminals -->
+                  <circle cx="410" cy="165" r="5" fill="#047857" stroke="#a7f3d0" stroke-width="1" />
+                  <circle cx="425" cy="165" r="5" fill="#047857" stroke="#a7f3d0" stroke-width="1" />
+                  <text x="435" y="195" fill="#ffffff" font-family="sans-serif" font-size="10" font-weight="600" text-anchor="middle">ACS712 (Curr)</text>
+                  <text x="435" y="206" fill="#a7f3d0" font-family="monospace" font-size="7" text-anchor="middle">Reserved / Auto</text>
+                </g>
+
+                <!-- 12V DC Motor Component -->
+                <g id="svg-comp-motor" class="svg-comp">
+                  <!-- Motor Body (Color bound to Health Index) -->
+                  <rect id="svg-motor-body" x="520" y="120" width="120" height="120" rx="10" fill="#0070f3" stroke="#ffffff" stroke-width="2" />
+                  <!-- Motor Shaft & Rotor -->
+                  <rect x="640" y="168" width="35" height="24" fill="#94a3b8" />
+                  <!-- Rotating Fan / Flywheel -->
+                  <g id="svg-motor-rotor" style="transform-origin: 660px 180px;">
+                    <circle cx="660" cy="180" r="26" fill="none" stroke="#e2e8f0" stroke-width="3" stroke-dasharray="12,8" />
+                    <line x1="640" y1="180" x2="680" y2="180" stroke="#e2e8f0" stroke-width="3" />
+                    <line x1="660" y1="160" x2="660" y2="200" stroke="#e2e8f0" stroke-width="3" />
+                  </g>
+                  <text x="580" y="175" fill="#ffffff" font-family="sans-serif" font-size="13" font-weight="bold" text-anchor="middle">12V DC Motor</text>
+                  <text x="580" y="192" fill="#f8fafc" font-family="monospace" font-size="9" text-anchor="middle">Degradation Target</text>
+                </g>
+
+                <!-- Status LEDs & Buzzer -->
+                <g id="svg-status-indicators">
+                  <!-- Green LED -->
+                  <circle id="svg-led-green" cx="280" cy="75" r="8" fill="#00dfd8" stroke="#ffffff" stroke-width="1.5" />
+                  <text x="280" y="98" fill="#94a3b8" font-family="sans-serif" font-size="9" text-anchor="middle">SYS OK</text>
+                  <!-- Red LED -->
+                  <circle id="svg-led-red" cx="340" cy="75" r="8" fill="#475569" stroke="#ffffff" stroke-width="1.5" />
+                  <text x="340" y="98" fill="#94a3b8" font-family="sans-serif" font-size="9" text-anchor="middle">ALERT</text>
+                  <!-- Buzzer -->
+                  <circle cx="410" cy="75" r="14" fill="#1e293b" stroke="#cbd5e1" stroke-width="1.5" />
+                  <circle cx="410" cy="75" r="5" fill="#475569" />
+                  <text x="410" y="102" fill="#94a3b8" font-family="sans-serif" font-size="9" text-anchor="middle">Buzzer</text>
+                  <!-- Sound wave arcs -->
+                  <g id="svg-buzzer-waves" style="display: none;">
+                    <path d="M 430 65 A 15 15 0 0 1 430 85" stroke="#ee0000" stroke-width="2" fill="none" class="svg-pulse-glow" />
+                    <path d="M 437 60 A 25 25 0 0 1 437 90" stroke="#ee0000" stroke-width="2" fill="none" class="svg-pulse-glow" />
+                  </g>
+                </g>
+              </svg>
+
+              <!-- Device Offline Watermark Overlay -->
+              <div id="svg-offline-watermark" class="svg-offline-overlay" style="display: none;">
+                <h4>DEVICE OFFLINE</h4>
+                <p style="font-size: 12px; color: #64748b; margin: 0;">No telemetry received within 3&times; sampling interval (&gt;60s)</p>
+              </div>
+
+              <!-- Interactive Component Inspection Drawer -->
+              <div id="live-comp-detail-card" class="live-comp-drawer">
+                <div class="drawer-header">
+                  <strong id="live-comp-detail-name" style="font-size: 13px; color: #0f172a;">Component</strong>
+                  <button id="live-comp-detail-close" class="drawer-close">&times;</button>
+                </div>
+                <div id="live-comp-detail-role" style="font-size: 11px; color: #64748b; margin-bottom: 8px;">Role</div>
+                <div style="font-size: 16px; font-weight: bold; font-family: monospace; color: #0070f3; margin-bottom: 4px;" id="live-comp-detail-val">--</div>
+                <div style="font-size: 11px; color: #475569;" id="live-comp-detail-baseline">Baseline: Normal</div>
+                <div style="font-size: 11px; font-weight: 600; color: #10b981; margin-top: 4px;" id="live-comp-detail-health">Health Score: 100%</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- RUL Forecasting & Health Index Overview -->
+          <div class="live-rul-box">
+            <div class="rul-main-stat">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span class="kpi-title" style="margin: 0;">Machine Health Index</span>
+                <span id="live-hi-state-badge" class="status-pill status-pill-success">OPTIMAL</span>
+              </div>
+              <div style="display: flex; align-items: baseline; gap: 10px; margin-top: 4px;">
+                <span id="live-hi-score" style="font-size: 32px; font-weight: 800; font-family: monospace;">--%</span>
+                <span style="font-size: 12px; color: #64748b;">composite score</span>
+              </div>
+
+              <!-- Subsystem Breakdown Bars -->
+              <div class="subsystem-bars-container">
+                <div class="subsystem-bar-row">
+                  <div class="subsystem-bar-label">
+                    <span>Vibration (MPU6050)</span>
+                    <span id="live-sub-vib-score">--%</span>
+                  </div>
+                  <div class="subsystem-progress-track">
+                    <div id="live-sub-vib-bar" class="subsystem-fill-bar bg-success" style="width: 100%;"></div>
+                  </div>
+                </div>
+                <div class="subsystem-bar-row">
+                  <div class="subsystem-bar-label">
+                    <span>Thermal (DHT11)</span>
+                    <span id="live-sub-therm-score">--%</span>
+                  </div>
+                  <div class="subsystem-progress-track">
+                    <div id="live-sub-therm-bar" class="subsystem-fill-bar bg-success" style="width: 100%;"></div>
+                  </div>
+                </div>
+                <div class="subsystem-bar-row">
+                  <div class="subsystem-bar-label">
+                    <span>Environment (Humidity &bull; Pressure)</span>
+                    <span id="live-sub-env-score">--%</span>
+                  </div>
+                  <div class="subsystem-progress-track">
+                    <div id="live-sub-env-bar" class="subsystem-fill-bar bg-success" style="width: 100%;"></div>
+                  </div>
+                </div>
+                <div class="subsystem-bar-row">
+                  <div class="subsystem-bar-label">
+                    <span>Electrical (ACS712 Current)</span>
+                    <span id="live-sub-elec-score">Reserved (N/A)</span>
+                  </div>
+                  <div class="subsystem-progress-track">
+                    <div id="live-sub-elec-bar" class="subsystem-fill-bar bg-muted" style="width: 0%;"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Remaining Useful Life (RUL) Section -->
+            <div style="border-top: 1px solid var(--color-hairline); padding-top: 16px; margin-top: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span class="kpi-title" style="margin: 0;">Remaining Useful Life (RUL)</span>
+                <span id="live-rul-confidence" class="badge badge-high">HIGH CONFIDENCE</span>
+              </div>
+              <div class="rul-highlight text-success" id="live-rul-display">--</div>
+              <div id="live-rul-subtitle" style="font-size: 12px; color: #64748b; margin-top: 4px;">Statistically honest physical wear projection</div>
+
+              <!-- RUL Meta Grid -->
+              <div class="rul-meta-grid">
+                <div class="rul-meta-item">
+                  <div class="label">Operating Hours</div>
+                  <div class="val" id="live-operating-hours">-- hrs</div>
+                </div>
+                <div class="rul-meta-item">
+                  <div class="label">Time to Warning</div>
+                  <div class="val" id="live-time-to-warn">--</div>
+                </div>
+                <div class="rul-meta-item">
+                  <div class="label">Degradation Model</div>
+                  <div class="val" id="live-rul-method" style="font-size: 13px;">exponential wear</div>
+                </div>
+                <div class="rul-meta-item">
+                  <div class="label">Failure Probability</div>
+                  <div class="val" id="live-fail-prob">--%</div>
+                </div>
+              </div>
+
+              <!-- Prescriptive Action -->
+              <div class="prescriptive-action-card">
+                <strong>Prescriptive Action:</strong>
+                <span id="live-prescriptive-action">Collecting telemetry...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4 Canvas Charts Grid -->
+        <div class="live-charts-grid">
+          <!-- Chart 1: Health Index -->
+          <div class="live-chart-card">
+            <div class="live-chart-header">
+              <div class="live-chart-title">Machine Health Index (HI) Over Time</div>
+              <div class="live-chart-legend">
+                <div class="legend-item"><span class="legend-dot" style="background: #0070f3;"></span>HI (%)</div>
+                <div class="legend-item"><span class="legend-dot" style="background: #f5a623;"></span>Warning (60%)</div>
+                <div class="legend-item"><span class="legend-dot" style="background: #ee0000;"></span>Failure (30%)</div>
+              </div>
+            </div>
+            <canvas id="canvas-live-hi" class="live-canvas-responsive" width="550" height="220"></canvas>
+          </div>
+
+          <!-- Chart 2: RUL Degradation Forecast -->
+          <div class="live-chart-card">
+            <div class="live-chart-header">
+              <div class="live-chart-title">RUL Degradation Trajectory & Extrapolation</div>
+              <div class="live-chart-legend">
+                <div class="legend-item"><span class="legend-dot" style="background: #0070f3;"></span>Fitted Curve</div>
+                <div class="legend-item"><span class="legend-dot" style="background: #38bdf8;"></span>95% Confidence Band</div>
+              </div>
+            </div>
+            <canvas id="canvas-live-rul" class="live-canvas-responsive" width="550" height="220"></canvas>
+          </div>
+
+          <!-- Chart 3: Motor Vibration RMS -->
+          <div class="live-chart-card">
+            <div class="live-chart-header">
+              <div class="live-chart-title">Dynamic Vibration RMS vs. Baseline &plusmn; 3&sigma;</div>
+              <div class="live-chart-legend">
+                <div class="legend-item"><span class="legend-dot" style="background: #0f172a;"></span>Vibration (g)</div>
+                <div class="legend-item"><span class="legend-dot" style="background: #6366f1;"></span>Upper 3&sigma;</div>
+                <div class="legend-item"><span class="legend-dot" style="background: #ee0000;"></span>Spike Anomaly</div>
+              </div>
+            </div>
+            <canvas id="canvas-live-vib" class="live-canvas-responsive" width="550" height="220"></canvas>
+          </div>
+
+          <!-- Chart 4: Temperature & Humidity -->
+          <div class="live-chart-card">
+            <div class="live-chart-header">
+              <div class="live-chart-title">Ambient Temperature & Relative Humidity</div>
+              <div class="live-chart-legend">
+                <div class="legend-item"><span class="legend-dot" style="background: #ff0080;"></span>Temp (&deg;C)</div>
+                <div class="legend-item"><span class="legend-dot" style="background: #00dfd8;"></span>Humidity (%)</div>
+              </div>
+            </div>
+            <canvas id="canvas-live-env" class="live-canvas-responsive" width="550" height="220"></canvas>
+          </div>
+        </div>
+
+        <!-- Diagnostics & Analysis Panel -->
+        <div class="live-diagnostics-grid">
+          <!-- Left Column: Tables -->
+          <div class="live-panel-card">
+            <h3 style="font-size: 14px; font-weight: 600; margin-top: 0; margin-bottom: 12px;">Descriptive Telemetry Statistics</h3>
+            <div class="live-table-wrapper" style="margin-bottom: 24px;">
+              <table class="live-data-table">
+                <thead>
+                  <tr>
+                    <th>Sensor Feature</th>
+                    <th>Mean</th>
+                    <th>Std</th>
+                    <th>Min</th>
+                    <th>Max</th>
+                    <th>Median</th>
+                    <th>P95</th>
+                    <th>Rate/Hr</th>
+                  </tr>
+                </thead>
+                <tbody id="live-stats-table-body"></tbody>
+              </table>
+            </div>
+
+            <h3 style="font-size: 14px; font-weight: 600; margin-top: 0; margin-bottom: 12px;">Anomaly Episodes Log (Clustered)</h3>
+            <div class="live-table-wrapper">
+              <table class="live-data-table">
+                <thead>
+                  <tr>
+                    <th>Episode</th>
+                    <th>Start Time</th>
+                    <th>Duration</th>
+                    <th>Peak Vibration</th>
+                    <th>Severity</th>
+                    <th>ESP32 Alert</th>
+                  </tr>
+                </thead>
+                <tbody id="live-episodes-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right Column: Diagnostics & Data Quality -->
+          <div class="live-panel-card">
+            <h3 style="font-size: 14px; font-weight: 600; margin-top: 0; margin-bottom: 12px;">ESP32 Flag Reconciliation</h3>
+            <div class="dq-metric-row">
+              <span class="text-muted">Engine Flagged Anomalies:</span>
+              <strong id="live-recon-total-anom">--</strong>
+            </div>
+            <div class="dq-metric-row">
+              <span class="text-muted">ESP32 Firmware Alerts:</span>
+              <strong id="live-recon-esp32-flags">--</strong>
+            </div>
+            <div class="dq-metric-row" style="border-bottom: 2px solid #e2e8f0; margin-bottom: 16px;">
+              <span class="text-muted">Agreement Rate:</span>
+              <strong id="live-recon-agreement" class="text-success">--%</strong>
+            </div>
+
+            <h3 style="font-size: 14px; font-weight: 600; margin-top: 0; margin-bottom: 8px;">Bivariate Sensor Correlations</h3>
+            <div id="live-correlations-list" style="margin-bottom: 16px;"></div>
+
+            <h3 style="font-size: 14px; font-weight: 600; margin-top: 0; margin-bottom: 8px;">Data Quality & Health Report</h3>
+            <div class="dq-metric-row">
+              <span class="text-muted">Overall Quality Score:</span>
+              <strong id="live-dq-score" class="text-success">--%</strong>
+            </div>
+            <div class="dq-metric-row">
+              <span class="text-muted">Transmission Gaps:</span>
+              <span id="live-dq-gaps" class="font-mono">--</span>
+            </div>
+            <div class="dq-metric-row">
+              <span class="text-muted">Missing Rate:</span>
+              <span id="live-dq-missing" class="font-mono">--</span>
+            </div>
+            <div class="dq-metric-row">
+              <span class="text-muted">ACS712 Current Pin:</span>
+              <span id="live-dq-acs-status" class="font-mono text-muted">--</span>
+            </div>
+            <div class="dq-note-box">
+              <strong>Quantisation Note:</strong> DHT11 has 1.0&deg;C resolution (or 0.1&deg;C via DHT22) and 1% RH resolution with &plusmn;2&deg;C accuracy. Discrete step-wise changes are physically expected.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 1: FLEET & DIGITAL TWINS (SIMULATED) -->
+      <section class="tab-pane" id="tab-twins">
         <div class="controls-ribbon">
           <div class="ribbon-group">
             <span class="ribbon-label">Telemetry Playback:</span>
@@ -549,5 +996,6 @@
   </div>
 
   <script src="/static/app.js"></script>
+  <script src="/static/live.js"></script>
 </body>
 </html>

@@ -1,19 +1,12 @@
 """
-Synthetic Industrial Sensor Dataset Generation Module
-For Federated Learning and Digital Twin Integration in Industrial IoT Predictive Maintenance.
+Federated Predictive Maintenance Package - Real Hardware Telemetry & Federated Learning.
 """
 
-from .config import ClientConfig, FactoryProfile, OperatingCondition, SENSOR_COLUMNS
-from .physics_engine import IndustrialPhysicsEngine
-from .generator import SyntheticSensorGenerator
-from .statistics import DatasetProfiler
+from .config import HARDWARE_NODES, REAL_SENSOR_COLUMNS, RUL_CONFIG, FIELD_MAPPINGS
 
 __all__ = [
-    "ClientConfig",
-    "FactoryProfile",
-    "OperatingCondition",
-    "SENSOR_COLUMNS",
-    "IndustrialPhysicsEngine",
-    "SyntheticSensorGenerator",
-    "DatasetProfiler",
+    "HARDWARE_NODES",
+    "REAL_SENSOR_COLUMNS",
+    "RUL_CONFIG",
+    "FIELD_MAPPINGS",
 ]

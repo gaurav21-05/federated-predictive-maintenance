@@ -108,3 +108,4 @@ The following tests in `tests/` depend on synthetic data and modules:
 - `tests/test_dashboard.py` (tests simulated endpoints `/api/overview`, etc.)
 
 **Action**: Remove tests coupled to synthetic data and replace with real-data tests (`test_live_analytics.py`, `test_live_rul.py`, `test_live_ml.py`, `test_privacy.py`, `test_federated_real.py`).
+

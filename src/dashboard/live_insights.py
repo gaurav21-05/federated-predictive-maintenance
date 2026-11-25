@@ -219,3 +219,4 @@ def get_diagnostics_insights(
         _INSIGHTS_CACHE["cached_at"] = now
         _INSIGHTS_CACHE["data"] = result
         return result
+

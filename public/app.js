@@ -1232,14 +1232,19 @@
     setupSvgClickDrawer();
   }
 
-  // Entry point
-  document.addEventListener('DOMContentLoaded', () => {
+  // Entry point with readyState guard
+  function boot() {
     initElements();
     setupTabs();
     setupEventListeners();
-
-    // Initial fetch
     fetchLiveTelemetry();
-  });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+
 
 })();

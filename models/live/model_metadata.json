@@ -1,0 +1,152 @@
+{
+  "model_card": {
+    "name": "ESP32 Bench Federated Autoencoder & Isolation Forest",
+    "version": "1.0.0-real",
+    "architecture": "4-layer Symmetric Bottleneck Autoencoder (5 -> 4 -> 2 -> 4 -> 5)",
+    "telemetry_source": "ThingSpeak Channel 3591448",
+    "training_samples_total": 65,
+    "normal_baseline_samples": 61,
+    "virtual_partitions": [
+      {
+        "name": "Virtual Partition 1 (Session A - Early)",
+        "samples": 20
+      },
+      {
+        "name": "Virtual Partition 2 (Session B - Mid)",
+        "samples": 20
+      },
+      {
+        "name": "Virtual Partition 3 (Session C - Late)",
+        "samples": 21
+      }
+    ],
+    "features": [
+      "temperature_c",
+      "humidity_pct",
+      "temp_secondary_c",
+      "pressure_hpa",
+      "vibration_g"
+    ],
+    "assumptions": [
+      "Unsupervised anomaly detection calibrated on ESP32-normal (field7=0, field8=0, vibration < 0.15g).",
+      "Virtual time-partitioned clients represent operational sessions across time on single physical hardware.",
+      "Reconstruction error above 95th percentile baseline triggers anomaly score elevation."
+    ],
+    "limitations": [
+      "Trained on 65 telemetry rows from a single physical bench setup.",
+      "Motor current (field6/ACS712) currently inactive; model dynamically evaluates 5 available channels.",
+      "RUL extrapolation requires consistent degradation trend; stable bench machines honestly report STABLE."
+    ]
+  },
+  "feature_scaling": {
+    "columns": [
+      "temperature_c",
+      "humidity_pct",
+      "temp_secondary_c",
+      "pressure_hpa",
+      "vibration_g"
+    ],
+    "means": [
+      23.28852,
+      63.14262,
+      23.55361,
+      994.41194,
+      0.03204
+    ],
+    "stds": [
+      0.77779,
+      7.91395,
+      0.75587,
+      1.15901,
+      0.02258
+    ]
+  },
+  "thresholds": {
+    "recon_p95": 2.75566,
+    "recon_p99": 3.68069,
+    "max_normal": 4.31823
+  },
+  "federated_benchmark": {
+    "strategies": {
+      "Centralized": {
+        "final_mse": 0.33091,
+        "rounds": 15,
+        "privacy": "None (Full Centralization)",
+        "round_losses": [
+          1.17209,
+          1.02417,
+          0.9308,
+          0.85726,
+          0.78863,
+          0.74776,
+          0.70464,
+          0.67546,
+          0.64595,
+          0.59791,
+          0.53479,
+          0.47393,
+          0.41799,
+          0.36786,
+          0.33091
+        ]
+      },
+      "FedAvg": {
+        "final_mse": 0.99334,
+        "rounds": 12,
+        "privacy": "Decentralized (No raw data sharing)",
+        "round_losses": [
+          1.032393,
+          1.025771,
+          1.02001,
+          1.015199,
+          1.010732,
+          1.007349,
+          1.004273,
+          1.001135,
+          0.998447,
+          0.996495,
+          0.994929,
+          0.993337
+        ]
+      },
+      "FedProx": {
+        "final_mse": 0.95342,
+        "rounds": 12,
+        "privacy": "Decentralized with Proximal Stability",
+        "round_losses": [
+          1.04804,
+          1.029673,
+          1.014513,
+          1.002833,
+          0.993891,
+          0.985798,
+          0.977799,
+          0.972382,
+          0.966504,
+          0.961552,
+          0.956924,
+          0.95342
+        ]
+      },
+      "DP-FedAvg": {
+        "final_mse": 0.88881,
+        "rounds": 12,
+        "privacy": "Differential Privacy (C=1.0, sigma=0.03, eps ~ 1.8)",
+        "round_losses": [
+          1.068864,
+          1.03624,
+          1.018584,
+          1.005807,
+          0.992525,
+          0.970663,
+          0.958517,
+          0.948561,
+          0.939903,
+          0.922375,
+          0.907176,
+          0.888814
+        ]
+      }
+    }
+  }
+}

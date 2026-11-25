@@ -37,7 +37,7 @@ All notable changes to the **Industrial IoT Federated Predictive Maintenance & D
   - Idempotent prescriptive maintenance work order creation when health dips below warning threshold.
 - **Live Hardware Twin Frontend (`src/dashboard/static/` and `public/`)**:
   - New "Live Hardware Twin" navigation tab with pulsing `LIVE` badge.
-  - Clear `LIVE (real hardware)` vs `SIMULATED` badge distinction across all dashboard tabs.
+  - Clear `LIVE (real hardware)` vs `synthetic simulation` badge distinction across all dashboard tabs.
   - Interactive SVG Digital Twin diagram featuring ESP32 DevKit, MPU6050 with vibration shake animation, DHT11, ACS712, N-MOSFET, DC motor (color-coded to Health Index), buzzer sound waves, and alert LEDs.
   - Click-to-inspect component drawer showing live readings, role, and health score.
   - Connection status badge (LIVE / OFFLINE with age) and watermark overlay when device is offline.

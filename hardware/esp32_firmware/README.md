@@ -165,8 +165,8 @@ lib_deps =
    #define BACKEND_URL       "http://192.168.1.150:8000/api/telemetry/ingest"
 
    // Set the target machine identifier (maps to digital twin client):
-   // CNC_MILL_01 -> client_1 | HYDR_PRESS_02 -> client_2 | TURB_COMP_03 -> client_3
-   #define MACHINE_ID        "CNC_MILL_01"
+   // ESP32_BENCH_01 -> client_1 | ESP32_BENCH_02 -> client_2 | ESP32_BENCH_03 -> client_3
+   #define MACHINE_ID        "ESP32_BENCH_01"
 
    // Interval between successive telemetry dispatches (ms)
    #define TELEMETRY_INTERVAL_MS  2000UL
@@ -254,7 +254,7 @@ The firmware communicates directly with the FastAPI backend endpoint:
 ### Request JSON Payload Specification
 ```json
 {
-  "machine_id": "CNC_MILL_01",
+  "machine_id": "ESP32_BENCH_01",
   "temperature_c": 24.5,
   "humidity_pct": 52.0,
   "acceleration_x": 0.012,
@@ -272,7 +272,7 @@ The firmware communicates directly with the FastAPI backend endpoint:
 ### Field Validation Matrix (Pydantic Contract)
 | Field Name | Type | Constraints / Bounds | Description |
 | :--- | :--- | :--- | :--- |
-| `machine_id` | `string` | 1–64 characters, non-empty | Unique asset tag (`CNC_MILL_01`, `HYDR_PRESS_02`, `TURB_COMP_03`) |
+| `machine_id` | `string` | 1–64 characters, non-empty | Unique asset tag (`ESP32_BENCH_01`, `ESP32_BENCH_02`, `ESP32_BENCH_03`) |
 | `temperature_c` | `float` | $\ge -40.0$, $\le 150.0$ | Ambient / housing temperature in $^\circ\text{C}$ (DHT11) |
 | `humidity_pct` | `float` | $\ge 0.0$, $\le 100.0$ | Relative humidity percentage (DHT11) |
 | `acceleration_x` | `float` | $\ge -50.0$, $\le 50.0$ | Static orientation acceleration along X in $g$ |
@@ -304,7 +304,7 @@ The firmware communicates directly with the FastAPI backend endpoint:
 *  IIoT Federated Predictive Maintenance & Digital Twin      *
 *  ESP32 Edge Sensor Telemetry Firmware v1.0.0               *
 **************************************************************
-*  Machine ID:     CNC_MILL_01
+*  Machine ID:     ESP32_BENCH_01
 *  Source Tag:     ESP32_LIVE
 *  Ingest API:     http://192.168.1.100:8000/api/telemetry/ingest
 *  Cadence:        2000 ms
@@ -325,16 +325,16 @@ The firmware communicates directly with the FastAPI backend endpoint:
 [SYSTEM] Initialization complete. Entering autonomous monitoring loop.
 
 ==================== [CYCLE #1] ====================
-Asset ID:        CNC_MILL_01 | Source: ESP32_LIVE
+Asset ID:        ESP32_BENCH_01 | Source: ESP32_LIVE
 Timestamp:       2026-10-16T02:15:32Z
 Temperature:     24.2 °C  | Humidity: 51.0 % RH
 Static Tilt Acc: X=0.014g, Y=-0.009g, Z=0.998g
 Angular Vel:     X=0.12°/s, Y=-0.05°/s, Z=0.02°/s
 Vibration (RMS): 0.0382 g (Peak Dynamic: 0.0714 g)
 Free Heap:       278144 bytes
-Outgoing JSON:   {"machine_id":"CNC_MILL_01","temperature_c":24.2,"humidity_pct":51.0,"acceleration_x":0.014,"acceleration_y":-0.009,"acceleration_z":0.998,"gyro_x":0.12,"gyro_y":-0.05,"gyro_z":0.02,"vibration_g":0.038,"source":"ESP32_LIVE","timestamp":"2026-10-16T02:15:32Z"}
+Outgoing JSON:   {"machine_id":"ESP32_BENCH_01","temperature_c":24.2,"humidity_pct":51.0,"acceleration_x":0.014,"acceleration_y":-0.009,"acceleration_z":0.998,"gyro_x":0.12,"gyro_y":-0.05,"gyro_z":0.02,"vibration_g":0.038,"source":"ESP32_LIVE","timestamp":"2026-10-16T02:15:32Z"}
 [HTTP SUCCESS] Status 200 OK in 62 ms
-[BACKEND ACK]  Response: {"status":"success","machine_id":"CNC_MILL_01","timestamp":"2026-10-16T02:15:32Z","source":"ESP32_LIVE","storage":"in_memory","persisted":false,"target_client_id":"client_1","digital_twin":{"overall_health_index":98.6,"operational_state":"NOMINAL","rul_minutes":1425.0,"primary_fault_subsystem":"none"},"new_work_orders":[]}
+[BACKEND ACK]  Response: {"status":"success","machine_id":"ESP32_BENCH_01","timestamp":"2026-10-16T02:15:32Z","source":"ESP32_LIVE","storage":"in_memory","persisted":false,"target_client_id":"client_1","digital_twin":{"overall_health_index":98.6,"operational_state":"NOMINAL","rul_minutes":1425.0,"primary_fault_subsystem":"none"},"new_work_orders":[]}
 Transmission Stats: 1 attempted, 1 acknowledged (Success Rate: 100.0%)
 ====================================================
 ```

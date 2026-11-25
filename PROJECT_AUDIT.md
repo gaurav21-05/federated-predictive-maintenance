@@ -101,7 +101,7 @@ flowchart TB
      - `GET /api/maintenance/orders` $\rightarrow$ Populates maintenance work-order queue.
    - Pre-rendered benchmark charts and static fallback history are rendered into HTML5 canvases.
 2. **Telemetry Playback Loop**:
-   - When the operator clicks **"Step +1"**, **"Step +10"**, or activates **"Auto-Stream"** (500ms interval):
+   - When the operator clicks **"Step"**, **"Step0"**, or activates **"Auto-Stream"** (500ms interval):
      - `POST /api/digital-twin/step` is dispatched with `{ client_id: null, steps: N }`.
      - `DashboardService.step()` reads subsequent rows from `datasets[cid]`, feeds telemetry dictionaries into `MachineDigitalTwin.ingest_telemetry_point()`, and recomputes the composite Machine Health Index (MHI).
      - `RULEstimator.predict_rul()` updates the degradation trajectory and calculates remaining minutes.
@@ -136,7 +136,7 @@ flowchart TB
 | **Federated Distributed Transport** | Network socket communication, client worker isolation, gRPC / Flower framework transport. | **MISSING** | Runs synchronously in a single Python process looping through client objects. |
 | **Differential Privacy: DP-SGD** | Global L2-norm update clipping to bound sensitivity ($C$) and calibrated Gaussian noise injection $\mathcal{N}(0, (\sigma C)^2)$. | **VERIFIED** | `src/privacy/dp_engine.py`. Clipping and Gaussian variance verified in unit tests. |
 | **Privacy Accountant (RDP)** | Rényi Differential Privacy moments accountant evaluating 31 orders $\alpha \in [1.25, 256.0]$, $(\epsilon, \delta)$ conversion. | **VERIFIED** | `src/privacy/accountant.py`. Monotonic budget growth and noise calibration verified. |
-| **Secure Aggregation (SecAgg)** | Cryptographic pairwise masking based on Bonawitz et al. protocol. | **SIMULATED** | `src/privacy/secure_aggregation.py`. Simulates zero-sum cancellation using SHA256 derived seeds in-memory. Lacks DH key exchange, Shamir secret sharing, and network transport. |
+| **Secure Aggregation (SecAgg)** | Cryptographic pairwise masking based on Bonawitz et al. protocol. | **synthetic simulation** | `src/privacy/secure_aggregation.py`. Simulates zero-sum cancellation using SHA256 derived seeds in-memory. Lacks DH key exchange, Shamir secret sharing, and network transport. |
 | **Digital Twin State Engine** | Multi-subsystem health tracking (vibration, thermal, electrical, pressure), composite MHI computation, fault root-cause localization. | **VERIFIED** | `src/digital_twin/twin_engine.py`. Subsystem degradation validated under synthetic sensor shocks. |
 | **Remaining Useful Life (RUL)** | Exponential wear trajectory extrapolation $H(t) = H_0 e^{-\lambda t}$ down to critical threshold (25%). | **VERIFIED** | `src/digital_twin/rul_estimator.py`. High vs. low degradation rate predictions verified in unit tests. |
 | **What-If Scenario Sandbox** | Non-linear degradation multiplier $\kappa = (\text{RPM})^{2.2} (\text{Load})^{1.8} (1 + 0.035 \Delta T)$ evaluating lifespan impact. | **VERIFIED** | `src/digital_twin/what_if_simulator.py`. De-rating extension and overdrive wear verified in tests. |
@@ -207,7 +207,7 @@ Stored in `data/client_X/client_X_sensor_data.csv` and streamed tick-by-tick:
 ```json
 {
   "timestamp": "2026-03-01 08:00:00",
-  "machine_id": "CNC_MILL_01",
+  "machine_id": "ESP32_BENCH_01",
   "temperature": 58.42,
   "humidity": 45.10,
   "vibration": 1.245,
@@ -219,7 +219,7 @@ Stored in `data/client_X/client_X_sensor_data.csv` and streamed tick-by-tick:
 ```
 *Physical Units & Types:*
 - `timestamp`: ISO-8601 string or chronological date string.
-- `machine_id`: String identifier (`CNC_MILL_01`, `HYD_PRESS_02`, `TURBO_COMP_03`).
+- `machine_id`: String identifier (`ESP32_BENCH_01`, `HYD_PRESS_02`, `TURBO_COMP_03`).
 - `temperature`: Continuous float, operating temperature in degrees Celsius (°C).
 - `humidity`: Continuous float, ambient relative humidity percentage (%).
 - `vibration`: Continuous float, Root Mean Square (RMS) vibration velocity in mm/s (ISO 10816).
@@ -343,9 +343,9 @@ python tests/test_dataset.py
 **Output:**
 ```text
 [*] Starting Dataset Verification Suite...
-  [PASS] client_1: 12,000 rows, 0 nulls, failure rate = 2.28%
-  [PASS] client_2: 12,000 rows, 0 nulls, failure rate = 2.25%
-  [PASS] client_3: 12,000 rows, 0 nulls, failure rate = 2.29%
+  [PASS] client_1: benchmark rows, 0 nulls, failure rate = 2.28%
+  [PASS] client_2: benchmark rows, 0 nulls, failure rate = 2.25%
+  [PASS] client_3: benchmark rows, 0 nulls, failure rate = 2.29%
   [PASS] Combined Dataset: 36,000 rows (>= 30,000 threshold satisfied)
 [+] All verification tests passed successfully!
 ```

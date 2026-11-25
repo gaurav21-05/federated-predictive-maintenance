@@ -165,7 +165,7 @@ The FastAPI backend received the HTTP request, but Pydantic rejected the JSON pa
    - The backend validator requires an ISO-8601 string parseable by `datetime.fromisoformat` (e.g. `2026-10-16T02:15:30Z`), or an explicit JSON `null`.
    - If NTP has not synchronized, the firmware sets `timestamp = nullptr`, which serializes to `null` and allows FastAPI to supply server-side UTC time.
 3. **Invalid `source` Tag**:
-   - `source` must strictly be `"ESP32_LIVE"` or `"SIMULATED"`.
+   - `source` must strictly be `"ESP32_LIVE"` or `"synthetic offline"`.
    - Verify that `SOURCE_TAG` in `config.h` is set to `"ESP32_LIVE"`.
 
 ---

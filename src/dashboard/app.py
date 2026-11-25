@@ -1,77 +1,54 @@
 """
-FastAPI Application for Industrial IoT Federated Predictive Maintenance Dashboard
-Exposes RESTful APIs for telemetry monitoring, digital twin state sync, what-if stress sandbox,
-prescriptive maintenance work orders, and interactive federated learning runs.
+FastAPI Backend for Real Hardware Federated Predictive Maintenance Dashboard.
+Real ThingSpeak telemetry ingestion, robust live analytics, pure-NumPy Autoencoder &
+Isolation Forest inference, honest RUL forecasting, and AI diagnostics insights.
+
+No simulated machinery, zero PyTorch imports in runtime path (Vercel serverless compatible).
 """
 
 import csv
+import io
 import sys
 from datetime import datetime, timezone
-from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
-# Resolve directories and ensure project root is in sys.path
-DASHBOARD_DIR = Path(__file__).resolve().parent
-STATIC_DIR = DASHBOARD_DIR / "static"
-PROJECT_ROOT = DASHBOARD_DIR.parent.parent
+# Ensure project root is in sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-try:
-    from .service import DashboardService
-    from .thingspeak import ThingSpeakAdapter, FIELD_MAPPING
-    from .live_analytics import (
-        compute_descriptive_stats,
-        compute_robust_baseline,
-        detect_anomalies,
-        detect_anomaly_episodes,
-        analyze_trends,
-        compute_correlations,
-        generate_data_quality_report,
-    )
-    from .live_rul import (
-        compute_live_health_series,
-        compute_sample_subsystems,
-        compute_composite_health_index,
-        estimate_rul,
-        DEFAULT_WARNING_THRESHOLD,
-        DEFAULT_FAILURE_THRESHOLD,
-    )
-except (ImportError, ValueError):
-    from src.dashboard.service import DashboardService
-    from src.dashboard.thingspeak import ThingSpeakAdapter, FIELD_MAPPING
-    from src.dashboard.live_analytics import (
-        compute_descriptive_stats,
-        compute_robust_baseline,
-        detect_anomalies,
-        detect_anomaly_episodes,
-        analyze_trends,
-        compute_correlations,
-        generate_data_quality_report,
-    )
-    from src.dashboard.live_rul import (
-        compute_live_health_series,
-        compute_sample_subsystems,
-        compute_composite_health_index,
-        estimate_rul,
-        DEFAULT_WARNING_THRESHOLD,
-        DEFAULT_FAILURE_THRESHOLD,
-    )
-
+from src.dashboard.thingspeak import ThingSpeakAdapter, FIELD_MAPPING
+from src.dashboard.live_analytics import (
+    compute_descriptive_stats,
+    compute_robust_baseline,
+    detect_anomalies,
+    detect_anomaly_episodes,
+    analyze_trends,
+    compute_correlations,
+    generate_data_quality_report,
+)
+from src.dashboard.live_rul import (
+    compute_live_health_series,
+    estimate_rul,
+    DEFAULT_WARNING_THRESHOLD,
+    DEFAULT_FAILURE_THRESHOLD,
+)
+from src.dashboard.live_ml import ml_engine
+from src.dashboard.live_insights import get_diagnostics_insights
 
 app = FastAPI(
-    title="IIoT Federated Predictive Maintenance & Digital Twin Dashboard",
-    description="Privacy-Preserving Industrial Edge Predictive Maintenance & Physics-Grounded Digital Twin Monitoring",
-    version="1.0.0",
+    title="Real Hardware Federated Predictive Maintenance API",
+    description="Live ThingSpeak telemetry, pure-NumPy edge Autoencoder & Isolation Forest, honest RUL, and AI insights",
+    version="2.0.0-real",
 )
 
-# Enable CORS for local testing
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -80,216 +57,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize single service instance
-service = DashboardService()
-
-
-# Request Models
-class TelemetrySource(str, Enum):
-    ESP32_LIVE = "ESP32_LIVE"
-    SIMULATED = "SIMULATED"
-
-
-class TelemetryIngestRequest(BaseModel):
-    machine_id: str = Field(..., min_length=1, max_length=64, description="Unique machine identifier (e.g. CNC_MILL_01)")
-    temperature_c: float = Field(..., ge=-40.0, le=150.0, description="Temperature in Celsius (-40.0°C to 150.0°C)")
-    humidity_pct: float = Field(..., ge=0.0, le=100.0, description="Relative humidity percentage (0.0% to 100.0%)")
-    acceleration_x: float = Field(..., ge=-50.0, le=50.0, description="Acceleration along X-axis in g (-50.0g to 50.0g)")
-    acceleration_y: float = Field(..., ge=-50.0, le=50.0, description="Acceleration along Y-axis in g (-50.0g to 50.0g)")
-    acceleration_z: float = Field(..., ge=-50.0, le=50.0, description="Acceleration along Z-axis in g (-50.0g to 50.0g)")
-    gyro_x: float = Field(..., ge=-2000.0, le=2000.0, description="Angular velocity around X-axis in deg/s (-2000.0 to 2000.0 deg/s)")
-    gyro_y: float = Field(..., ge=-2000.0, le=2000.0, description="Angular velocity around Y-axis in deg/s (-2000.0 to 2000.0 deg/s)")
-    gyro_z: float = Field(..., ge=-2000.0, le=2000.0, description="Angular velocity around Z-axis in deg/s (-2000.0 to 2000.0 deg/s)")
-    vibration_g: float = Field(..., ge=0.0, le=50.0, description="Vibration amplitude/RMS in g (0.0g to 50.0g)")
-    source: TelemetrySource = Field(..., description="Telemetry source attribution: 'ESP32_LIVE' or 'SIMULATED'")
-    timestamp: Optional[str] = Field(default=None, description="ISO-8601 UTC timestamp string (optional, defaults to server UTC)")
-
-    # Optional complementary parameters
-    current_a: Optional[float] = Field(default=None, ge=0.0, le=500.0, description="Optional motor current in Amperes")
-    rpm: Optional[float] = Field(default=None, ge=0.0, le=20000.0, description="Optional rotational speed in RPM")
-    pressure_bar: Optional[float] = Field(default=None, ge=0.0, le=500.0, description="Optional hydraulic/pneumatic pressure in bar")
-
-    @field_validator("machine_id")
-    @classmethod
-    def validate_machine_id(cls, v: str) -> str:
-        s = v.strip()
-        if not s:
-            raise ValueError("machine_id must not be empty or whitespace only")
-        return s
-
-    @field_validator("timestamp")
-    @classmethod
-    def validate_timestamp(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return None
-        v_str = str(v).strip()
-        if not v_str:
-            return None
-        try:
-            datetime.fromisoformat(v_str.replace("Z", "+00:00"))
-        except Exception:
-            raise ValueError(f"Invalid timestamp format '{v}'. Expected ISO-8601 formatted timestamp string.")
-        return v_str
-
-
-class StepRequest(BaseModel):
-    client_id: Optional[str] = None
-    steps: int = Field(default=1, ge=1, le=100)
-
-
-class ResetRequest(BaseModel):
-    client_id: Optional[str] = None
-
-
-class WhatIfRequest(BaseModel):
-    client_id: str
-    scenario_key: Optional[str] = None
-    rpm_multiplier: float = 1.0
-    load_multiplier: float = 1.0
-    ambient_temp_delta: float = 0.0
-    horizon_minutes: float = 60.0
-
-
-class WorkOrderStatusRequest(BaseModel):
-    work_order_id: str
-    new_status: str
-
-
-class FederatedTrainRequest(BaseModel):
-    strategy: str = "FedProx"
-    num_rounds: int = Field(default=3, ge=1, le=20)
-    local_epochs: int = Field(default=1, ge=1, le=10)
-    learning_rate: float = Field(default=0.001, gt=0.0)
-    enable_dp: bool = True
-    clip_norm: float = Field(default=1.0, gt=0.0)
-    noise_multiplier: float = Field(default=0.05, ge=0.0)
-    enable_secagg: bool = True
-    mu: float = Field(default=0.01, ge=0.0)
-
-
-# REST Endpoints
-@app.get("/api/overview")
-def get_overview():
-    """Returns high-level plant fleet health, active machines, and federated status."""
-    return service.get_overview()
-
-
-@app.get("/api/telemetry/stream")
-def get_telemetry_stream(
-    client_id: str = Query("client_1", pattern="^client_[1-3]$"),
-    window: int = Query(50, ge=10, le=200),
-):
-    """Returns the current historical window of sensor telemetry for the selected client."""
-    return service.get_telemetry_window(client_id, window)
-
-
-@app.post("/api/telemetry/ingest")
-def ingest_telemetry(payload: TelemetryIngestRequest):
-    """
-    Ingests sensor telemetry from physical edge hardware (ESP32_LIVE) or synthetic simulation (SIMULATED).
-    Validates physical sensor bounds, routes reading to Digital Twin state engine,
-    and returns ingestion status, machine ID, timestamp, and source attribution.
-    """
-    timestamp = payload.timestamp or datetime.now(timezone.utc).isoformat()
-    data = payload.model_dump()
-    data["timestamp"] = timestamp
-    return service.ingest_telemetry(data)
-
-
-@app.get("/api/telemetry/latest")
-def get_latest_telemetry():
-    """Returns the most recent live or simulated telemetry reading and in-memory buffer statistics."""
-    return service.get_latest_ingested_sample()
-
-
-@app.post("/api/digital-twin/step")
-def step_simulation(req: StepRequest):
-    """Advances telemetry playback and updates Digital Twin state indices."""
-    return service.step(client_id=req.client_id, steps=req.steps)
-
-
-@app.post("/api/digital-twin/reset")
-def reset_simulation(req: ResetRequest):
-    """Resets digital twin state and playback pointer."""
-    return service.reset_simulation(client_id=req.client_id)
-
-
-@app.post("/api/digital-twin/what-if")
-def run_what_if_simulation(req: WhatIfRequest):
-    """Executes a what-if stress scenario simulation."""
-    res = service.run_what_if(
-        client_id=req.client_id,
-        scenario_key=req.scenario_key,
-        rpm_multiplier=req.rpm_multiplier,
-        load_multiplier=req.load_multiplier,
-        ambient_temp_delta=req.ambient_temp_delta,
-        horizon_minutes=req.horizon_minutes,
-    )
-    if "error" in res:
-        raise HTTPException(status_code=400, detail=res["error"])
-    return res
-
-
-@app.get("/api/maintenance/orders")
-def get_work_orders(status: Optional[str] = None):
-    """Retrieves all maintenance work orders."""
-    return service.get_work_orders(status=status)
-
-
-@app.post("/api/maintenance/update")
-def update_work_order(req: WorkOrderStatusRequest):
-    """Updates work order status (OPEN, ASSIGNED, RESOLVED)."""
-    res = service.update_work_order_status(req.work_order_id, req.new_status)
-    if "error" in res:
-        raise HTTPException(status_code=400, detail=res["error"])
-    return res
-
-
-@app.post("/api/federated/train")
-def run_federated_training(req: FederatedTrainRequest):
-    """Runs on-demand federated learning rounds with live metrics."""
-    res = service.run_federated_training(
-        strategy_name=req.strategy,
-        num_rounds=req.num_rounds,
-        local_epochs=req.local_epochs,
-        learning_rate=req.learning_rate,
-        enable_dp=req.enable_dp,
-        clip_norm=req.clip_norm,
-        noise_multiplier=req.noise_multiplier,
-        enable_secagg=req.enable_secagg,
-        mu=req.mu,
-    )
-    if "error" in res:
-        raise HTTPException(status_code=400, detail=res["error"])
-    return res
-
-
-@app.get("/api/benchmark/summary")
-def get_benchmark_summary():
-    """Returns comparative benchmark results across Centralized, Isolated, FedAvg, FedProx, and DP."""
-    report_file = PROJECT_ROOT / "docs" / "benchmark_report.md"
-    content = ""
-    if report_file.exists():
-        content = report_file.read_text(encoding="utf-8")
-
-    return {
-        "status": "ready" if content else "pending",
-        "has_figures": (PROJECT_ROOT / "docs" / "figures" / "fl_convergence.png").exists(),
-        "report_markdown": content,
-    }
-
-
-# ============================================================================
-# Live Hardware Telemetry & Real ESP32 Digital Twin Endpoints
-# ============================================================================
 thingspeak_adapter = ThingSpeakAdapter()
+PUBLIC_DIR = PROJECT_ROOT / "public"
+STATIC_DIR = PROJECT_ROOT / "src" / "dashboard" / "static"
 
 
-def _get_live_hardware_data(results: int = 100, window: str = "all") -> Dict[str, Any]:
-    """
-    Fetch, normalize, analyze, and compute RUL for live ESP32 hardware via ThingSpeak.
-    Stateless and safe for Vercel Serverless.
-    """
+# Request / Response Schemas
+class RetrainRequest(BaseModel):
+    results: int = Field(default=100, ge=10, le=8000, description="Telemetry batch size for fine-tuning")
+
+
+class InsightsRequest(BaseModel):
+    force_refresh: bool = Field(default=False, description="Bypass 5-minute cache and re-query LLM")
+
+
+def _get_live_hardware_payload(results: int = 100, window: str = "all") -> Dict[str, Any]:
+    """Fetch, normalize, analyze, and enrich telemetry from ThingSpeak."""
     try:
         raw_feeds, channel_info, source = thingspeak_adapter.fetch_raw_feeds(results=results)
     except Exception as e:
@@ -316,6 +99,7 @@ def _get_live_hardware_data(results: int = 100, window: str = "all") -> Dict[str
             "anomalies": [],
             "reconciliation": {},
             "events": [],
+            "trends": {},
             "correlations": {},
             "data_quality": {},
             "twin": {"health_index": 100.0, "state": "UNKNOWN", "subsystems": {}},
@@ -326,13 +110,12 @@ def _get_live_hardware_data(results: int = 100, window: str = "all") -> Dict[str
     if window in ("1h", "24h") and len(samples) > 1:
         last_dt = datetime.fromisoformat(samples[-1]["timestamp"].replace("Z", "+00:00"))
         cutoff_seconds = 3600.0 if window == "1h" else 86400.0
-        filtered_samples = [
+        filtered = [
             s for s in samples
             if (last_dt - datetime.fromisoformat(s["timestamp"].replace("Z", "+00:00"))).total_seconds() <= cutoff_seconds
         ]
-        # Use filtered if it has enough samples, else fall back to all
-        if len(filtered_samples) >= 5:
-            samples = filtered_samples
+        if len(filtered) >= 5:
+            samples = filtered
 
     # Baseline & Stats
     baseline = compute_robust_baseline(samples)
@@ -353,8 +136,7 @@ def _get_live_hardware_data(results: int = 100, window: str = "all") -> Dict[str
 
     # Health Index Series & Subsystems
     health_series = compute_live_health_series(samples, baseline)
-    
-    # Merge health index and subsystem scores back into each sample
+
     enriched_samples = []
     for s, h in zip(samples, health_series):
         merged = dict(s)
@@ -365,7 +147,6 @@ def _get_live_hardware_data(results: int = 100, window: str = "all") -> Dict[str
         merged["electrical_health"] = h["electrical_health"]
         enriched_samples.append(merged)
 
-    # Latest Digital Twin state
     latest_sample = enriched_samples[-1]
     current_hi = latest_sample["health_index"]
     twin_state = "OPTIMAL" if current_hi >= 80.0 else "WARNING" if current_hi >= 50.0 else "CRITICAL"
@@ -388,34 +169,7 @@ def _get_live_hardware_data(results: int = 100, window: str = "all") -> Dict[str
         },
     }
 
-    # RUL Prediction
     rul = estimate_rul(samples, baseline)
-
-    # Optional Idempotent Prescriptive Work Order
-    # When health dips below warning threshold (60) or RUL < 1.0 hr, dispatch work order
-    if current_hi < DEFAULT_WARNING_THRESHOLD and hasattr(service, "dispatcher"):
-        episode_ref = episodes[-1]["episode_id"] if episodes else "EP-LIVE"
-        wo_id = f"WO-ESP32-{episode_ref}"
-        if wo_id not in service.dispatcher.work_orders:
-            from src.digital_twin.maintenance_dispatcher import MaintenanceWorkOrder
-            weak_sub = "vibration" if (latest_sample["vibration_health"] or 100) < 60 else "thermal"
-            wo = MaintenanceWorkOrder(
-                work_order_id=wo_id,
-                machine_id="ESP32_BENCH_01",
-                machine_name="ESP32 Bench Edge Node",
-                timestamp=latest_sample["timestamp"],
-                urgency="P1_CRITICAL" if current_hi < 35.0 else "P2_HIGH",
-                affected_subsystem=weak_sub,
-                machine_health_index=current_hi,
-                estimated_rul_minutes=rul.get("rul_minutes") or 60.0,
-                recommended_action=rul.get("recommended_action") or "Inspect bench motor mounting and MPU6050 wiring.",
-                estimated_downtime_hours=0.5,
-                required_spare_parts=["MPU6050 Vibration Sensor", "12V DC Motor", "N-MOSFET Driver"],
-                technician_skill_level="Level 1 Edge Technician",
-                safety_precautions=["Disconnect 12V DC motor power rail", "Inspect 3.3V GPIO lines"],
-                status="OPEN",
-            )
-            service.dispatcher.work_orders[wo_id] = wo
 
     return {
         "status": "success",
@@ -446,46 +200,133 @@ def _get_live_hardware_data(results: int = 100, window: str = "all") -> Dict[str
     }
 
 
+# ============================================================================
+# API Routes
+# ============================================================================
+
 @app.get("/api/live/hardware")
 def get_live_hardware(
     results: int = Query(100, ge=10, le=8000),
     window: str = Query("all", pattern="^(1h|24h|all)$"),
 ):
-    """
-    Returns full telemetry stream, robust analytics, anomaly episodes,
-    digital twin state, and RUL forecast for the real ESP32 edge device.
-    """
-    return _get_live_hardware_data(results=results, window=window)
+    """Real ThingSpeak telemetry + connection health + 5-min stats + alerts."""
+    return _get_live_hardware_payload(results=results, window=window)
 
 
-@app.get("/api/live/rul")
-def get_live_rul(
-    results: int = Query(100, ge=10, le=8000),
+@app.get("/api/live/hardware/history")
+def get_live_hardware_history(
+    results: int = Query(200, ge=10, le=8000),
     window: str = Query("all", pattern="^(1h|24h|all)$"),
 ):
-    """
-    Returns lightweight RUL prediction and digital twin state snapshot.
-    """
-    data = _get_live_hardware_data(results=results, window=window)
+    """Windowed historical telemetry time-series for charts and export."""
+    payload = _get_live_hardware_payload(results=results, window=window)
     return {
-        "status": data["status"],
-        "online": data["online"],
-        "age_seconds": data["age_seconds"],
-        "twin": data["twin"],
-        "rul": data["rul"],
-        "source": data["source"],
+        "status": payload["status"],
+        "channel_id": payload["channel_id"],
+        "total_samples": len(payload.get("series", [])),
+        "online": payload["online"],
+        "series": payload.get("series", []),
     }
+
+
+@app.get("/api/analysis/stats")
+def get_analysis_stats(
+    results: int = Query(200, ge=10, le=8000),
+    window: str = Query("all", pattern="^(1h|24h|all)$"),
+):
+    """Full statistical analysis: MAD, robust z-scores, CUSUM drift, EWMA, correlations, gaps."""
+    payload = _get_live_hardware_payload(results=results, window=window)
+    return {
+        "status": payload["status"],
+        "window": window,
+        "sample_count": len(payload.get("series", [])),
+        "stats": payload.get("stats", {}),
+        "baseline": payload.get("baseline", {}),
+        "trends": payload.get("trends", {}),
+        "correlations": payload.get("correlations", {}),
+        "data_quality": payload.get("data_quality", {}),
+        "reconciliation": payload.get("reconciliation", {}),
+        "episodes": payload.get("events", []),
+    }
+
+
+@app.get("/api/analysis/model")
+def get_analysis_model(
+    results: int = Query(200, ge=10, le=8000),
+):
+    """ML anomaly scores, autoencoder reconstruction, honest RUL, and FL model card."""
+    payload = _get_live_hardware_payload(results=results, window="all")
+    series = payload.get("series", [])
+    
+    # Compute ML scores and honest RUL
+    ml_scores = ml_engine.compute_anomaly_scores(series)
+    honest_rul = ml_engine.estimate_honest_rul(series)
+    model_meta = ml_engine.get_model_card_and_metrics()
+
+    return {
+        "status": "success",
+        "sample_count": len(series),
+        "ml_inference": ml_scores,
+        "honest_rul": honest_rul,
+        "model_card": model_meta.get("model_card", {}),
+        "federated_benchmark": model_meta.get("federated_benchmark", {}),
+        "thresholds": model_meta.get("thresholds", {}),
+    }
+
+
+@app.post("/api/analysis/retrain")
+def retrain_federated_model(req: RetrainRequest):
+    """Lightweight federated update round on current cached telemetry."""
+    payload = _get_live_hardware_payload(results=req.results, window="all")
+    series = payload.get("series", [])
+    return ml_engine.retrain_federated_round(series)
+
+
+@app.post("/api/analysis/insights")
+def get_analysis_insights(req: InsightsRequest):
+    """AI diagnostics summary via Claude API with rate limiting and rule-based fallback."""
+    payload = _get_live_hardware_payload(results=100, window="all")
+    series = payload.get("series", [])
+    stats = payload.get("stats", {})
+    twin = payload.get("twin", {})
+    rul = payload.get("rul", {})
+    trends = payload.get("trends", {})
+
+    latest = payload.get("latest") or {}
+    vibe_stats = stats.get("vibration_g", {})
+    temp_stats = stats.get("temperature_c", {})
+    hum_stats = stats.get("humidity_pct", {})
+    vibe_trend = trends.get("vibration_g", {})
+
+    summary = {
+        "device_name": "ESP32 Industrial IoT Bench Node",
+        "health_index": twin.get("health_index", 100.0),
+        "operational_state": twin.get("state", "OPTIMAL"),
+        "latest_vibration_g": latest.get("vibration_g", 0.02),
+        "vibration_mean_g": vibe_stats.get("mean", 0.02),
+        "vibration_max_g": vibe_stats.get("max", 0.02),
+        "vibration_slope_per_hour": vibe_trend.get("slope_per_hour", 0.0),
+        "latest_temp_c": latest.get("temperature_c", 24.0),
+        "temp_mean_c": temp_stats.get("mean", 24.0),
+        "latest_humidity_pct": latest.get("humidity_pct", 65.0),
+        "humidity_mean_pct": hum_stats.get("mean", 65.0),
+        "esp32_anomaly_flag": latest.get("esp32_anomaly", 0),
+        "esp32_alert_flag": latest.get("esp32_alert", 0),
+        "recent_anomaly_count": len(payload.get("events", [])),
+        "rul_state": rul.get("rul_status", "STABLE"),
+        "estimated_rul_hours": rul.get("rul_hours") or "> 1000 h",
+    }
+
+    return get_diagnostics_insights(summary, force_refresh=req.force_refresh)
 
 
 @app.get("/api/live/export.csv")
 def export_live_csv(
     results: int = Query(500, ge=10, le=8000),
 ):
-    """
-    Export the analyzed telemetry time series and health metrics as CSV.
-    """
-    data = _get_live_hardware_data(results=results, window="all")
-    series = data.get("series", [])
+    """Export analyzed telemetry time series and health metrics as CSV."""
+    payload = _get_live_hardware_payload(results=results, window="all")
+    series = payload.get("series", [])
 
     fields = [
         "timestamp",
@@ -506,7 +347,6 @@ def export_live_csv(
         "status",
     ]
 
-    import io
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
@@ -516,38 +356,37 @@ def export_live_csv(
     return Response(
         content=output.getvalue(),
         media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="live_hardware_telemetry.csv"'},
+        headers={"Content-Disposition": 'attachment; filename="esp32_hardware_telemetry.csv"'},
     )
 
 
-# Health check
 @app.get("/api/health")
 def get_health():
-    """Health check endpoint for uptime monitoring."""
-    return {"status": "ok", "app": "IIoT Predictive Maintenance"}
+    """Uptime health check."""
+    return {
+        "status": "healthy",
+        "mode": "REAL_DATA_ONLY",
+        "device": "ESP32 DevKit V1",
+        "channel_id": thingspeak_adapter.channel_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
-# Static Files & SPA Root
-try:
-    if STATIC_DIR.exists():
-        app.mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False), name="static")
-except Exception:
-    pass
+# Static files mount
+if PUBLIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(PUBLIC_DIR), check_dir=False), name="static")
+elif STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False), name="static")
 
 
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
-    index_path = STATIC_DIR / "index.html"
-    if index_path.exists():
-        return HTMLResponse(content=index_path.read_text(encoding="utf-8"))
-    public_path = PROJECT_ROOT / "public" / "index.html"
-    if public_path.exists():
-        return HTMLResponse(content=public_path.read_text(encoding="utf-8"))
-    return HTMLResponse(content="<h1>IIoT Edge Intelligence Dashboard Active</h1><p>Visit <a href='/docs'>/docs</a> for API documentation.</p>")
+    for candidate in [PUBLIC_DIR / "index.html", STATIC_DIR / "index.html"]:
+        if candidate.exists():
+            return HTMLResponse(content=candidate.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<h1>IIoT Real Edge Intelligence Dashboard</h1><p>Visit <a href='/docs'>/docs</a> for API documentation.</p>")
 
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("src.dashboard.app:app", host="127.0.0.1", port=8000, reload=True)
-
-

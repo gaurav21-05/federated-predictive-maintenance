@@ -1,35 +1,49 @@
-# Industrial IoT Federated Predictive Maintenance & Digital Twin
+# Real Hardware Industrial IoT Federated Predictive Maintenance & Digital Twin
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Framework](https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c.svg)](https://pytorch.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688.svg)](https://fastapi.tiangolo.com/)
+[![Edge Hardware](https://img.shields.io/badge/Hardware-ESP32%20DevKit%20V1-orange.svg)](https://www.espressif.com/)
 
-A privacy-preserving, physics-grounded federated predictive maintenance and digital twin synchronization system simulating heterogeneous, non-IID operational edge nodes across industrial manufacturing plants.
+A real-hardware predictive maintenance and edge intelligence platform connected directly to physical IoT hardware (ESP32 DevKit V1, MPU6050 accelerometer, DHT11 temperature/humidity probe, and 12V DC motor) publishing telemetry to ThingSpeak. Features pure-NumPy unsupervised edge anomaly detection, honest Remaining Useful Life (RUL) forecasting, time-partitioned federated learning, and automated AI diagnostics insights powered by Anthropic Claude.
 
 ---
 
-## 🌟 Key Features
+## 🌟 Key Capabilities
 
-1. **Non-IID Industrial IoT Sensor Generation**:
-   - Physics-grounded degradation simulation for 3 distinct machines:
-     - **Client 1**: 5-Axis High-Speed CNC Milling Machine (`CNC_MILL_01`) - High RPM, thermal bearing friction failure mode.
-     - **Client 2**: Heavy-Duty Hydraulic Stamping Press (`HYDR_PRESS_02`) - Cyclic shock vibration, extreme hydraulic pressure failure mode.
-     - **Client 3**: Rotary Screw Air Compressor & Micro-Turbine (`TURB_COMP_03`) - High humidity, motor winding over-current failure mode.
-2. **Federated Learning Framework**:
-   - **FedAvg** & **FedProx** algorithms tailored for heterogeneous edge devices.
-   - **Differential Privacy (DP-SGD)** with gradient clipping and Gaussian noise injection.
-   - **Secure Aggregation (SecAgg)** simulation with simulated Diffie-Hellman secret masking.
-   - Multi-architecture models: 1D-CNN + LSTM and Edge-optimized MLP.
-3. **Physics-Grounded Digital Twin**:
-   - Real-time Machine Health Index (MHI) and subsystem breakdown (vibration, thermal, electrical, pressure).
-   - Remaining Useful Life (RUL) estimation with confidence intervals.
-   - "What-If" operational stress scenario testing (overclocking, thermal spikes, load spikes).
-4. **Prescriptive Maintenance & Dispatch**:
-   - Automated work order generation and lifecycle tracking (OPEN, ASSIGNED, RESOLVED).
-5. **Interactive Web Dashboard**:
-   - Built with FastAPI + modern responsive glassmorphism UI.
-   - Real-time telemetry streaming, interactive federated training control room, and sandbox simulation.
+1. **Real Hardware Telemetry Ingestion**:
+   - Live ingestion from ThingSpeak Channel `3591448` via robust serverless-safe adapter (`src/dashboard/thingspeak.py`).
+   - 10-second in-memory caching to respect ThingSpeak's 15s rate limits; automatic offline detection if telemetry age exceeds 60 seconds (3x sampling interval).
+   - Validates physical bounds, normalizes data types, detects gaps, and flags anomalies.
+
+2. **Interactive Live Monitor & SVG Digital Twin**:
+   - Single responsive dashboard with 8 real sensor KPI cards:
+     - Field 1: Temperature (°C, DHT11)
+     - Field 2: Relative Humidity (%, DHT11)
+     - Field 3: Secondary Temperature (°C, tracks field 1)
+     - Field 4: Pressure (hPa, atmospheric)
+     - Field 5: Vibration RMS (g, MPU6050 dynamic acceleration)
+     - Field 6: Motor Current (A, ACS712 reserved channel, auto-activates when data arrives)
+     - Field 7: ESP32 Hardware Anomaly Flag
+     - Field 8: ESP32 Buzzer/Alarm Flag
+   - Interactive SVG schematic of the physical hardware testbed (ESP32, MPU6050, DHT11, N-MOSFET, DC motor, LEDs, buzzer) dynamically reflecting real-time state.
+   - Five HTML5 Canvas charts: Vibration RMS with $\pm 3\sigma$ envelope, dual-axis thermal/humidity, unconfirmed channels, motor current, and composite Health Index (0-100) with warning and failure thresholds.
+
+3. **Analysis & Prediction Engine**:
+   - **Descriptive Statistics**: Mean, standard deviation, median, Median Absolute Deviation (MAD), percentiles, and hourly rate of change.
+   - **Unsupervised ML Anomaly Detection**: 4-layer symmetric bottleneck Autoencoder (5 -> 4 -> 2 -> 4 -> 5) reconstruction error + scikit-learn Isolation Forest scoring calibrated on normal hardware operating states.
+   - **Honest RUL Estimation**: Trend extrapolation toward physical limits (0.25 g vibration threshold) with 90% confidence intervals. When the machine operates stably with negligible degradation slope, it displays `STABLE - no degradation trend detected` (> 1000 h) rather than artificial failure numbers.
+   - **AI Diagnostics Summary**: Endpoint `POST /api/analysis/insights` compiling sensor statistics, trend slopes, and health scores into an engineering assessment using the Anthropic Claude API (with a 5-minute cache and deterministic rule-based fallback).
+
+4. **Federated Learning on Real Telemetry**:
+   - Real telemetry is partitioned into **3 Virtual Time Nodes** (Session A: Early, Session B: Mid, Session C: Late) to demonstrate decentralized training on genuine physical distributions.
+   - Comparative evaluation across Centralized, FedAvg, FedProx, and DP-FedAvg (Differential Privacy with gradient clipping and Gaussian noise).
+   - In-memory fine-tuning button ("Retrain on Latest Data") running pure-NumPy gradient aggregation without serverless overhead.
+
+5. **Serverless-Optimized Architecture**:
+   - Zero PyTorch dependencies in the production runtime path (`requirements.txt`).
+   - Offline training script (`scripts/train_federated_live.py`) exports compact weights (`autoencoder_weights.npz`) and metadata to `models/live/` (< 500 KB total).
+   - Pure-NumPy inference executes in sub-millisecond time on Vercel Serverless.
 
 ---
 
@@ -37,37 +51,40 @@ A privacy-preserving, physics-grounded federated predictive maintenance and digi
 
 ```
 federated-predictive-maintenance/
-├── data/                               # Sensor datasets & digital twin states
-│   ├── client_1/                       # CNC Milling Spindle telemetry (12,000 records)
-│   ├── client_2/                       # Hydraulic Stamping Press telemetry (12,000 records)
-│   ├── client_3/                       # Compressor & Turbine telemetry (12,000 records)
-│   ├── combined_industrial_sensors.csv # Aggregated benchmark dataset (36,000 records)
-│   └── dataset_summary.md              # Statistical profile
-├── docs/                               # Documentation, PRD & figures
-│   ├── PRD.md                          # Product Requirements Document
-│   ├── benchmark_report.md             # Benchmark analysis report
-│   └── figures/                        # Visual convergence & pareto plots
+├── .env.example                         # Environment configuration template
+├── feeds.csv                            # Offline fallback and test telemetry (65 samples)
+├── hardware/
+│   └── esp32_firmware/
+│       ├── esp32_thingspeak.ino         # Arduino C++ firmware for ESP32 DevKit V1
+│       └── secrets.example.h            # Wi-Fi & ThingSpeak credentials template
 ├── models/
-│   └── checkpoints/                    # Saved local & global PyTorch weights
+│   └── live/                            # Lightweight exported ML artefacts
+│       ├── autoencoder_weights.npz      # Pure-NumPy Autoencoder weights
+│       ├── isolation_forest.joblib      # Scikit-learn Isolation Forest model
+│       └── model_metadata.json          # Model card, scaling, and FL benchmarks
+├── public/                              # Vercel-served single-source static frontend
+│   ├── index.html                       # Responsive 2-page UI (Live Monitor & Analysis)
+│   ├── app.js                           # Reactive dashboard controller & canvas renderers
+│   └── style.css                        # Design system & dark/light theme styles
 ├── scripts/
-│   ├── start_dashboard.py              # CLI launcher for web application
-│   ├── run_generator.py                # Synthetic dataset generation CLI
-│   ├── run_federated.py                # Federated training runner
-│   ├── run_digital_twin_sync.py        # Digital twin synchronization runner
-│   ├── run_benchmarks.py               # Comprehensive evaluation suite
-│   └── analyze_dataset.py              # Telemetry inspection CLI
+│   ├── start_dashboard.py               # Local FastAPI development launcher
+│   └── train_federated_live.py          # Standalone offline PyTorch federated trainer
 ├── src/
-│   ├── config.py                       # Physics baselines & factory profiles
-│   ├── physics_engine.py               # Degradation physics modeling
-│   ├── generator.py                    # Sensor data generator orchestrator
-│   ├── models.py                       # PyTorch CNN-LSTM & MLP neural architectures
-│   ├── trainer.py                      # Local & federated trainers
-│   ├── dashboard/                      # FastAPI application & static web UI
-│   ├── digital_twin/                   # Digital twin, RUL, what-if engines
-│   ├── federated/                      # Client, server, FedAvg, FedProx implementations
-│   └── privacy/                        # DP-SGD & Secure Aggregation engines
-├── tests/                              # Unit & integration test suite (29 tests)
-└── requirements.txt                    # Project dependencies
+│   ├── config.py                        # Hardware node profiles & field mappings
+│   ├── dashboard/
+│   │   ├── app.py                       # FastAPI application & REST endpoints
+│   │   ├── live_analytics.py            # Descriptive stats, robust MAD, EWMA, CUSUM
+│   │   ├── live_insights.py             # Claude API insights & deterministic fallback
+│   │   ├── live_ml.py                   # Pure-NumPy ML inference & honest RUL
+│   │   ├── live_rul.py                  # Physical subsystem health & RUL calculation
+│   │   ├── service.py                   # Unified telemetry service layer
+│   │   ├── thingspeak.py                # ThingSpeak HTTP ingestion & caching adapter
+│   │   └── static/                      # Mirrored copy of public/
+│   ├── federated/                       # Client, server, FedAvg, FedProx implementations
+│   └── privacy/                         # DP-SGD & Secure Aggregation engines
+├── tests/                               # Comprehensive unit test suite (40 tests)
+├── requirements.txt                     # Production runtime dependencies (NO torch)
+└── requirements-train.txt               # Offline training dependencies (with torch)
 ```
 
 ---
@@ -76,136 +93,67 @@ federated-predictive-maintenance/
 
 ### 1. Installation
 
-Clone the repository and install required dependencies:
+Clone the repository and install runtime dependencies:
 ```bash
 git clone https://github.com/gaurav21-05/federated-predictive-maintenance.git
 cd federated-predictive-maintenance
 pip install -r requirements.txt
 ```
 
-### 2. Run the Interactive Web Dashboard
+*(Optional) For offline ML training, install training dependencies:*
+```bash
+pip install -r requirements-train.txt
+```
 
-Launch the FastAPI dashboard server:
+### 2. Configure Credentials
+
+Create a `.env` file in the project root:
+```bash
+cp .env.example .env
+```
+Fill in your credentials:
+```env
+TS_CHANNEL_ID=3591448
+TS_READ_KEY=UP0CR69D9NOTNYPN
+LIVE_DATA_FALLBACK_CSV=./feeds.csv
+# Optional: Set your Anthropic API key for AI diagnostic insights
+ANTHROPIC_API_KEY=
+```
+
+### 3. Launch Web Dashboard
+
+Run the server locally:
 ```bash
 python scripts/start_dashboard.py --host 127.0.0.1 --port 8000
 ```
-Then open your browser at **[http://localhost:8000](http://localhost:8000)** (API documentation available at **[http://localhost:8000/docs](http://localhost:8000/docs)**).
+Open your browser at **[http://localhost:8000](http://localhost:8000)** (API docs at **[http://localhost:8000/docs](http://localhost:8000/docs)**).
 
-### 3. Generate or Regenerate Sensor Data
+### 4. Run Unit Tests
 
-To regenerate synthetic sensor data (12,000 records per client):
-```bash
-python scripts/run_generator.py --records-per-client 12000 --seed 42
-```
-
-### 4. Run Federated Learning
-
-Train the global predictive maintenance model across all 3 simulated factories:
-```bash
-python scripts/run_federated.py --strategy FedProx --rounds 5 --epochs 2 --enable-dp
-```
-
-### 5. Run Digital Twin Synchronization
-
-Run the continuous telemetry stream ingestion and digital twin synchronization:
-```bash
-python scripts/run_digital_twin_sync.py --steps 500
-```
-
-### 6. Run Automated Tests
-
-Execute the full suite of unit and integration tests (43 tests):
+Execute the full unit test suite:
 ```bash
 python -m unittest discover tests
 ```
 
 ---
 
-## 🛰️ Physical Hardware Edge Ingestion & Live Digital Twin
+## 📊 Physical Field Mapping
 
-In addition to simulated industrial machines, the platform connects to real physical IoT edge hardware (ESP32 DevKit V1 + MPU6050 + DHT11 + ACS712) via ThingSpeak cloud ingestion.
-
-### Architecture
-
-```
-  +-----------------------------------------------------------+
-  |                   Physical Bench Hardware                 |
-  |  ESP32 DevKit V1 (240MHz) + MPU6050 + DHT11 + ACS712      |
-  +-----------------------------┬-----------------------------+
-                                │ Wi-Fi 802.11 b/g/n (~20s interval)
-                                ▼
-  +-----------------------------------------------------------+
-  |              ThingSpeak IoT Cloud (Private)               |
-  |  Channel ID: 3591448                                      |
-  +-----------------------------┬-----------------------------+
-                                │ REST JSON (10s in-memory cache + backoff)
-                                ▼
-  +-----------------------------------------------------------+
-  |             FastAPI Backend Gateway Layer                 |
-  |  - /api/live/hardware (Full Telemetry, Baseline & Anomaly) |
-  |  - /api/live/rul      (Lightweight RUL + Subsystems)      |
-  |  - /api/live/export.csv (Analysed CSV Download)           |
-  |  - Zero PyTorch dependencies in live path (Vercel-safe)   |
-  +-----------------------------┬-----------------------------+
-                                │ Visibility-aware polling
-                                ▼
-  +-----------------------------------------------------------+
-  |             Interactive Web Dashboard (SPA)               |
-  |  - Live Hardware Twin Tab (Real ESP32 Bench Node)         |
-  |  - Interactive SVG Digital Twin (Click to inspect)        |
-  |  - Tri-Method Anomaly Detection & Episode Clustering       |
-  |  - Statistically Honest RUL Degradation Trajectory        |
-  +-----------------------------------------------------------+
-```
-
-### Environment Variables
-
-Configure environment variables in `.env` (or in Vercel Project Settings for cloud deployment):
-
-| Variable | Description | Default | Required |
-| :--- | :--- | :--- | :---: |
-| `TS_CHANNEL_ID` | ThingSpeak Private Channel ID | `3591448` | Yes |
-| `TS_READ_KEY` | ThingSpeak Channel Read API Key | `""` | Yes (for live cloud) |
-| `LIVE_DATA_FALLBACK_CSV` | Path to local CSV file when offline or keys unset | `./feeds.csv` | No |
-
-### ThingSpeak Field Mapping
-
-| Channel Field | Key | Hardware Sensor | Status | Typical Range | Description |
-| :--- | :--- | :--- | :---: | :---: | :--- |
-| `field1` | `temperature_c` | DHT11 | **CONFIRMED** | 21 – 25 °C | Ambient Temperature |
-| `field2` | `humidity_pct` | DHT11 | **CONFIRMED** | 51 – 78 % | Relative Air Humidity |
-| `field3` | `temp_secondary_c` | Aux / Internal | *UNCONFIRMED* | ~23 – 25 °C | Secondary temperature channel |
-| `field4` | `pressure_hpa` | Barometer / Seal | *UNCONFIRMED* | ~993 – 995 hPa | Barometric pressure baseline |
-| `field5` | `vibration_g` | MPU6050 | **CONFIRMED** | 0.018 – 0.615 g | Dynamic AC RMS (gravity removed) |
-| `field6` | `current_a` | ACS712 | **RESERVED** | NA (or 0 – 5 A) | Motor current (activates auto) |
-| `field7` | `esp32_anomaly` | ESP32 Firmware | **CONFIRMED** | 0 or 1 | Edge threshold anomaly flag |
-| `field8` | `esp32_alert` | ESP32 Firmware | **CONFIRMED** | 0 or 1 | Buzzer and alert LED tripped |
-| `status` | `status_text` | ESP32 Firmware | **CONFIRMED** | Text | e.g. "MACHINE NORMAL" |
-
-### How RUL is Computed & Honesty Rules
-
-1. **Hardware Calibration**: The live RUL model is calibrated specifically for benchtop rotary hardware (0.02g baseline vibration) rather than heavy 1–2 mm/s industrial plant equipment.
-2. **Subsystem Scoring**: Individual health indices are derived from robust z-scores:
-   $$z = \frac{x - \text{median}}{1.4826 \cdot \text{MAD} + \epsilon}$$
-3. **Transient Spike Resilience**: Telemetry undergoes 1D median filtering before trend fitting so single-sample anomalous spikes (such as entries 5 and 40 in `feeds.csv`) never collapse the RUL projection.
-4. **Model Selection**: Compares Linear ($HI(t) = m \cdot t + b$) and Exponential ($HI(t) = HI_0 e^{-\lambda t}$) wear models via Residual Sum of Squares (AIC equivalent) and extrapolates to failure ($HI = 30\%$) and warning ($HI = 60\%$) thresholds.
-5. **Honesty Rules**: If fewer than 30 samples are available, or if the health index slope is not significantly negative ($m \ge -0.01\%/\text{hr}$), the engine returns `rul_status = "STABLE_NO_DEGRADATION"` or `"INSUFFICIENT_DATA"` with `rul = null`. **No made-up numbers are ever presented.**
-6. **Operating Hours Counter**: Sums real timestamp deltas while excluding idle or offline intervals longer than 5 minutes.
+| Channel | Sensor / Key | Unit | Description | Status |
+|---|---|---|---|---|
+| `field1` | `temperature_c` | °C | DHT11 Ambient Temperature (~21–25°C) | Confirmed |
+| `field2` | `humidity_pct` | % | DHT11 Relative Humidity (~51–78%) | Confirmed |
+| `field3` | `temp_secondary_c` | °C | Secondary Temperature Probe (tracks field1) | Unconfirmed |
+| `field4` | `pressure_hpa` | hPa | Atmospheric Pressure (~993–995 hPa) | Unconfirmed |
+| `field5` | `vibration_g` | g | MPU6050 Dynamic RMS (baseline ~0.02g, spikes up to 0.6g) | Confirmed |
+| `field6` | `current_a` | A | ACS712 Motor Current Shunt (reserved) | Auto-Activates |
+| `field7` | `esp32_anomaly` | flag | Edge Firmware Threshold Anomaly Flag (0/1) | Confirmed |
+| `field8` | `esp32_alert` | flag | Edge Firmware Buzzer / LED Alarm Trigger (0/1) | Confirmed |
 
 ---
 
-## 📊 Benchmark Summary
+## ⚖️ Assumptions & Limitations
 
-| Strategy | Accuracy | Macro F1 | Privacy Guarantee | Communication Overhead |
-| :--- | :---: | :---: | :---: | :---: |
-| **Centralized (Upper Bound)** | 98.4% | 0.962 | None (Data Pooled) | High |
-| **Isolated Local (Client 1)** | 94.1% | 0.895 | Local Only | None |
-| **FedAvg** | 96.8% | 0.941 | Private Raw Data | Medium |
-| **FedProx ($\mu=0.01$)** | 97.2% | 0.948 | Private Raw Data | Medium |
-| **FedProx + DP ($\varepsilon \approx 3.2$)**| 95.6% | 0.927 | $(\varepsilon, \delta)$-DP Guaranteed | Medium |
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License.
+- **Single Physical Device**: Telemetry originates from one physical ESP32 bench device. Federated learning is evaluated across time-based virtual sessions (Session A, B, C) explicitly documented as such.
+- **Unsupervised Modeling**: Due to ~65 normal operating samples from physical hardware, supervised failure classification is avoided in favor of unsupervised reconstruction and density estimation.
+- **Sampling Cadence**: ThingSpeak ~20-second telemetry updates are sufficient for thermal and vibration RMS trends, but high-frequency raw vibration waveforms (>25 Hz) are processed on-chip by the ESP32.

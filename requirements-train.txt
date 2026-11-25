@@ -1,0 +1,7 @@
+# Training & Experimentation dependencies (Offline Local Machine Only)
+-r requirements.txt
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.0.0
+matplotlib>=3.7.0
+scipy>=1.11.0
